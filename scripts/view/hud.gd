@@ -21,7 +21,7 @@ const HELP := [
 	["", ""],
 	["Win", "Shoot down the rival Overlord 3 times, bank 12 cows, or ride the tractor home."],
 	["", ""],
-	["", "F1 help  ·  F2 team size (2v2 / 4v4)  ·  F3 spectate bots  ·  F5 install update  ·  R restart  ·  Esc pause"],
+	["", "F1 help  ·  F2 team size (2v2 / 4v4)  ·  F3 spectate bots  ·  F5 check for update  ·  R restart  ·  Esc pause"],
 ]
 
 var game # Main

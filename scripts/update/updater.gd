@@ -11,6 +11,8 @@ const DEV_VERSION := "dev"
 ## The executable's name inside each platform's release zip.
 const EXE_NAMES := {"linux": "saucer-showdown.x86_64", "windows": "saucer-showdown.exe"}
 const EXEC_PERMISSIONS := 0x1ED # rwxr-xr-x
+## How long a one-off message ("You're up to date") stays on screen.
+const NOTE_MS := 5000
 
 enum State { OFF, CHECKING, IDLE, AVAILABLE, DOWNLOADING, INSTALLING, FAILED }
 
@@ -23,6 +25,9 @@ var feed_url := "https://api.github.com/repos/%s/releases/latest" % RELEASES_REP
 
 var _asset := {} # the release asset for this platform
 var _auto := false
+var _manual := false # the current check was asked for with F5
+var _note := ""
+var _note_until := 0
 var _http: HTTPRequest
 
 
@@ -55,6 +60,9 @@ func check() -> void:
 	var headers := ["Accept: application/vnd.github+json", "User-Agent: SaucerShowdown/%s" % version]
 	if _http.request(feed_url, headers) != OK:
 		state = State.IDLE
+		if _manual:
+			_manual = false
+			_say("Couldn't start the update check")
 
 
 ## Download and install the release found by check(). After a failure, open
@@ -62,6 +70,14 @@ func check() -> void:
 func install() -> void:
 	if state == State.FAILED:
 		OS.shell_open(page_url)
+		return
+	if state == State.OFF or state == State.IDLE:
+		# Nothing known to install: F5 asks GitHub again and says what it found.
+		if not enabled():
+			_say("Updates are off in this build (version %s)" % version)
+		else:
+			_manual = true
+			check()
 		return
 	if state != State.AVAILABLE:
 		return
@@ -90,6 +106,11 @@ func progress() -> float:
 
 ## One line for the HUD; empty when there is nothing to say.
 func status_text() -> String:
+	if state == State.CHECKING and _manual:
+		return "Checking for updates…"
+	if _note != "" and Time.get_ticks_msec() < _note_until and state != State.AVAILABLE \
+			and state != State.DOWNLOADING and state != State.INSTALLING and state != State.FAILED:
+		return _note
 	match state:
 		State.AVAILABLE:
 			return "Update %s is available  ·  F5 to install" % latest
@@ -176,15 +197,24 @@ func _on_request_completed(result: int, code: int, _headers: PackedStringArray, 
 
 func _on_checked(result: int, code: int, body: PackedByteArray) -> void:
 	state = State.IDLE
+	var manual := _manual
+	_manual = false
 	if result != HTTPRequest.RESULT_SUCCESS or code != 200:
 		print("Update check failed (result %d, HTTP %d)." % [result, code])
+		if manual:
+			_say("Couldn't check for updates (%s)" % (
+					"HTTP %d" % code if result == HTTPRequest.RESULT_SUCCESS else "no connection"))
 		return
 	var data = JSON.parse_string(body.get_string_from_utf8())
 	if not data is Dictionary or not data.has("tag_name"):
 		print("Update check failed: unexpected reply.")
+		if manual:
+			_say("Couldn't check for updates (unexpected reply)")
 		return
 	latest = str(data["tag_name"])
 	if not is_newer(latest, version):
+		if manual:
+			_say("You're up to date (%s)" % version)
 		return
 	page_url = str(data.get("html_url", page_url))
 	var assets = data.get("assets", [])
@@ -213,6 +243,12 @@ func _on_downloaded(result: int, code: int) -> void:
 		_fail(err)
 		return
 	get_tree().quit()
+
+
+func _say(text: String) -> void:
+	_note = text
+	_note_until = Time.get_ticks_msec() + NOTE_MS
+	print(text)
 
 
 func _fail(why: String) -> void:
