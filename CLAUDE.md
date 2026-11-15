@@ -8,6 +8,7 @@ Claude runs on a remote development machine. The user can only test, review or t
 - Push the current branch to `origin` (`git push -u origin HEAD`). If you're on `main`, make a branch first.
 - Commit in sensible steps as you go rather than one giant commit at the end, and push after each.
 - Never force-push or rewrite history that's already pushed unless the user asks.
+- Pushing is the finish line. Don't open pull requests, or offer to, unless the user asks for one.
 
 ## Project
 
