@@ -9,12 +9,17 @@ on:
     branches: [main]
     paths:
       - "scripts/sim/**"
+      - "scripts/net/**"
+      - "scripts/main.gd"
       - "tools/sim_trace.gd"
       - "tests/test_sim.gd"
+      - "tests/test_net.gd"
       - ".github/workflows/determinism.yml"
   pull_request:
     paths:
       - "scripts/sim/**"
+      - "scripts/net/**"
+      - "scripts/main.gd"
       - "tools/sim_trace.gd"
   workflow_dispatch:
 
@@ -61,6 +66,9 @@ jobs:
 
       - name: Run sim tests
         run: ~/godot/${{ matrix.bin }} --headless --path . --script tests/test_sim.gd
+
+      - name: Run network tests
+        run: ~/godot/${{ matrix.bin }} --headless --path . --script tests/test_net.gd
 
       - name: Write the trace
         run: ~/godot/${{ matrix.bin }} --headless --path . --script tools/sim_trace.gd -- "$PWD/trace-${{ runner.os }}.txt"

@@ -24,6 +24,7 @@ Godot 4.7 (standard build, GL Compatibility) team arcade brawler. See README.md 
 godot --headless --path . --import
 godot --headless --path . --script tests/test_sim.gd
 godot --headless --path . --script tests/test_updater.gd
+godot --headless --path . --script tests/test_net.gd
 ```
 
 Visual checks (this machine has no display, so wrap screenshots in `xvfb-run`):

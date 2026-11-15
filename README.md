@@ -43,7 +43,17 @@ A match is best of 3 maps.
 - **Saucer damage:** a saucer takes 3 hits to bring down. It smokes after one and sparks after two; the bar beside its lives shows what's left. A fresh saucer is back to full.
 - **Saucer wrecks:** a downed saucer stays where it falls as a platform until its Overlord respawns.
 
-Other keys: F1 controls, F2 team size (2v2 or 4v4), F3 hand Player 1's seat to a bot and watch, F5 check for an update (and install it when one is offered), R restart, Esc pause.
+Other keys: F1 controls, F2 team size (2v2 or 4v4), F3 hand Player 1's seat to a bot and watch, F5 check for an update (and install it when one is offered), F6 play online, R restart, Esc pause.
+
+## Play online
+
+Press **F6**. One player picks **Host a game**; the panel shows the address friends type into **Join**. Each machine's first keyboard takes a seat straight away and goes on the smaller team; anyone else at that machine joins with Enter or Start, just like couch play. Bots fill every empty seat, and take over when someone leaves. Players can join a match already in progress.
+
+- Everyone needs the same build; a mismatched one is turned away with the two versions named.
+- Only the host can pause, restart, or change the team size. Anyone can move the win banner on.
+- It works on a LAN, or over the internet if the host forwards **UDP port 24680** on their router. There's no matchmaking or relay yet.
+- Online play adds 4 ticks (about 67 ms) of input delay, for everyone including the host. Everyone waits for the slowest connection, so a lagging player stalls the game ("Waiting for players…") rather than desyncing it.
+- From the command line: `--host`, `--join=ADDRESS[:PORT]`, `--port=N` (after `--`).
 
 ## Layout
 
@@ -58,11 +68,13 @@ scripts/
     bot.gd             bot brains (write the same inputs a human does)
     input_frame.gd     one tick of every unit's input, packed into bytes
     fmath.gd           sin/cos that give the same bits on every platform
-  input/local_input.gd keyboards and gamepads
+  input/local_input.gd keyboards and gamepads, packed into one packet per tick
+  net/net_peer.gd      ENet transport and message protocol for online play
   update/updater.gd    update check and self-install from GitHub Releases
   view/
     arena_view.gd      draws the arena from sim state: sprites, animation, particles, glow
-    hud.gd             top bar, win banner, controls overlay
+    hud.gd             top bar, win banner, controls overlay, online status
+    online_menu.gd     the F6 host / join panel
     art.gd             loads and team-colours the sprites, and the fonts
 assets/
   sprites/             SVG art, one file per sprite
@@ -74,6 +86,7 @@ tools/
 tests/
   test_sim.gd          headless tests for every rule and win condition
   test_updater.gd      headless tests for version ordering and asset choice
+  test_net.gd          host and clients over loopback, checked tick by tick
   bot_stats.gd         balance probe: how bot-only matches end
 export_presets.cfg     Linux and Windows export settings
 .github/workflows/
@@ -83,9 +96,15 @@ export_presets.cfg     Linux and Windows export settings
 
 The simulation is deterministic and separate from rendering: inputs in, one fixed tick out. That is what makes it testable headless, and it is the shape rollback netcode needs.
 
-## Netcode groundwork
+## How online play works
 
-There is no online play yet, but the sim is ready for it:
+Offline and online run the same loop in `main.gd`. Each machine samples its local devices into one input packet per tick and hands it to the host (offline, the machine is its own host). The host applies seat changes, packs everyone's input into one `InputFrame` per tick, and sends it to every client. Every machine steps its sim only on those frames, so all of them run the identical match. That is delay-based lockstep; rollback can be added on top later without changing the sim.
+
+- **Late joiners** get a snapshot of the host's sim, then the frames from there on.
+- **Desyncs:** every second each client sends its checksum; if it doesn't match the host's, the host sends that client its current state and it carries on.
+- **Mismatched builds:** a client sends a fingerprint (the checksum of a short bot match), so any change to the sim or tuning is caught when it connects.
+
+The sim pieces that make this possible:
 
 - **A match is its seed plus its input frames.** `Sim.step_frame()` takes one `InputFrame` per tick: 5 bytes per unit (stick axes quantised to a signed byte, plus button bits). A unit flagged `BOT` is driven by the sim's own bot, whose seed comes from the match seed, so bots need no network traffic and switching a seat between human and bot is just a different frame.
 - **Rewind:** `save_state()` and `load_state()` snapshot everything, bots included. Loading reuses objects with the same id, so the view's animations survive a rollback.
@@ -123,6 +142,10 @@ godot --headless --path . --script tests/test_updater.gd
 ```
 
 ```bash
+godot --headless --path . --script tests/test_net.gd
+```
+
+```bash
 godot --headless --path . --script tests/bot_stats.gd -- 3
 ```
 
@@ -148,5 +171,6 @@ To rehearse an update against a local feed, debug exports accept `-- --update-fe
 
 - Bot balance: since saucers take 3 hits, bot-only matches mostly end in Economic wins after roughly 2–3 minutes, still short of the 3–5 minute target.
 - The Windows half of the updater has not been run on Windows yet.
-- No audio, no menus, no online play yet (see Netcode groundwork). The art is a first pass, not final.
-- The sim's events (bursts, "HEIST!" pop-ups) aren't rollback-aware yet: a replayed tick would show its effects again.
+- No audio and no main menu. The art is a first pass, not final.
+- Online: no NAT traversal or relay, so internet play needs a forwarded port; the input delay is fixed rather than tuned to the connection.
+- The sim's events (bursts, "HEIST!" pop-ups) aren't rollback-aware yet; that only matters once rollback replaces lockstep.
