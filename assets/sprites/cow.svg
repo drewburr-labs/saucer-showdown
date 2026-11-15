@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="50" height="34" viewBox="0 0 50 34">
+  <!-- Cow body and head (legs drawn in code). Faces right. Pivot (22,22) is the
+       hitbox centre; hooves land at y=32. -->
+  <defs>
+    <linearGradient id="hide" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#cfd3df"/>
+    </linearGradient>
+    <linearGradient id="nose" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffc2cc"/><stop offset="1" stop-color="#e7889a"/>
+    </linearGradient>
+  </defs>
+  <!-- tail -->
+  <path d="M8.5 13 Q3 14 3.5 21" fill="none" stroke="#140f26" stroke-width="3.6" stroke-linecap="round"/>
+  <path d="M8.5 13 Q3 14 3.5 21" fill="none" stroke="#e9ecf3" stroke-width="1.6" stroke-linecap="round"/>
+  <ellipse cx="3.6" cy="22" rx="2" ry="2.6" fill="#2a2233" stroke="#140f26" stroke-width="1.2"/>
+  <!-- body -->
+  <rect x="7.5" y="9.5" width="30" height="17" rx="7.5" fill="url(#hide)" stroke="#140f26" stroke-width="2.2"/>
+  <path d="M12 10 Q16 9.6 18 13.5 Q16.5 18 11.5 16.8 Q8.6 14.6 9.2 11.6 Z" fill="#2a2233"/>
+  <path d="M23 18.5 Q27.5 16.5 30 20 Q29.2 25.6 24.6 26.2 Q20.6 24.4 23 18.5 Z" fill="#2a2233"/>
+  <path d="M27 10 Q30.5 9.8 31.2 12.6 Q29 14 27 12.5 Z" fill="#2a2233"/>
+  <!-- udder -->
+  <path d="M15.5 25.6 Q18 29.4 20.5 25.6 Z" fill="url(#nose)" stroke="#140f26" stroke-width="1.3" stroke-linejoin="round"/>
+  <path d="M11 12 Q20 10.4 28 11.6" fill="none" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" opacity="0.9"/>
+  <!-- head -->
+  <path d="M33.5 6 L31 2.4 Q32.8 1.6 35 4.4 Z" fill="#f3e2b8" stroke="#140f26" stroke-width="1.2" stroke-linejoin="round"/>
+  <path d="M42.5 6 L45 2.4 Q43.2 1.6 41 4.4 Z" fill="#f3e2b8" stroke="#140f26" stroke-width="1.2" stroke-linejoin="round"/>
+  <ellipse cx="31" cy="8.6" rx="3.4" ry="2" transform="rotate(-20 31 8.6)" fill="#f2f3f8" stroke="#140f26" stroke-width="1.4"/>
+  <path d="M33 5 Q38 3.2 43.5 5 Q46 9 45.5 13 L32.5 13 Q31.5 9 33 5 Z" fill="url(#hide)" stroke="#140f26" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M34.5 5.2 Q37 4.4 38.5 5 Q38.6 8 35.5 8.4 Q34 7.2 34.5 5.2 Z" fill="#2a2233"/>
+  <rect x="32" y="11" width="15" height="8" rx="4" fill="url(#nose)" stroke="#140f26" stroke-width="2"/>
+  <ellipse cx="41.8" cy="14.6" rx="1.1" ry="1.4" fill="#7a3446"/>
+  <ellipse cx="45" cy="14.6" rx="1.1" ry="1.4" fill="#7a3446"/>
+  <circle cx="41" cy="8.6" r="1.7" fill="#140f26"/>
+  <circle cx="41.5" cy="8.1" r="0.6" fill="#ffffff"/>
+  <!-- bell -->
+  <path d="M33 19 Q34.6 18.4 36 19 L36.6 22.4 L32.4 22.4 Z" fill="#ffcc33" stroke="#140f26" stroke-width="1.2" stroke-linejoin="round"/>
+</svg>

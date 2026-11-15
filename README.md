@@ -2,9 +2,9 @@
 
 A team arcade brawler: two alien fleets fight over one farm, and there are three ways to win a map.
 
-This is the **greybox prototype** (step 1 of the concept doc): one map, bots in every seat a human doesn't take, and all three win conditions working. Everything is drawn with primitives; there are no art or sound assets yet.
+This is the **prototype** (step 1 of the concept doc): one map, bots in every seat a human doesn't take, and all three win conditions working. The art is a first pass of hand-written SVG sprites; there is no sound yet.
 
-![Prototype screenshot](docs/prototype.png)
+![Screenshot](docs/screenshot.png)
 
 ## Run it
 
@@ -57,7 +57,16 @@ scripts/
     bot.gd             bot brains (write the same inputs a human does)
   input/local_input.gd keyboards and gamepads
   update/updater.gd    update check and self-install from GitHub Releases
-  view/                greybox drawing and the HUD
+  view/
+    arena_view.gd      draws the arena from sim state: sprites, animation, particles, glow
+    hud.gd             top bar, win banner, controls overlay
+    art.gd             loads and team-colours the sprites, and the fonts
+assets/
+  sprites/             SVG art, one file per sprite
+  fonts/               Lilita One and Fredoka (SIL Open Font License)
+tools/
+  screenshot.gd        runs the game and saves screenshots
+  sprite_sheet.gd      saves every sprite, in both team colours, on one sheet
 tests/
   test_sim.gd          headless tests for every rule and win condition
   test_updater.gd      headless tests for version ordering and asset choice
@@ -68,6 +77,24 @@ export_presets.cfg     Linux and Windows export settings
 ```
 
 The simulation is deterministic and separate from rendering: inputs in, one fixed tick out. That is what makes it testable headless, and it is the shape rollback netcode will need later.
+
+## Art
+
+Every sprite is a plain SVG in `assets/sprites`, so it can be edited in Inkscape or any text editor. They are imported as "Keep File" and shipped as-is; `scripts/view/art.gd` rasterises them at 2× when the game starts.
+
+- **Team colours:** parts drawn in magenta are recoloured per team: `#ff00ff` becomes the team colour, `#800080` its shade and `#ff80ff` its highlight.
+- **Pivots:** each file's comment says which point sits on the sim's position (usually the hitbox centre) and which way it faces. Legs, arms, wheels, rings and lights are drawn in code so they can animate.
+- **Not supported:** the SVG renderer ignores `<pattern>` fills, so repeat shapes by hand.
+
+To check art changes without playing, render a sprite sheet or screenshots (screenshots need a display; use `xvfb-run -a` on a headless machine):
+
+```bash
+godot --headless --path . --script tools/sprite_sheet.gd -- sprites.png
+```
+
+```bash
+godot --path . --script tools/screenshot.gd -- shots 3 12 30
+```
 
 ## Tests
 
@@ -101,4 +128,4 @@ To rehearse an update against a local feed, debug exports accept `-- --update-fe
 
 - Bot balance: bot-only matches currently all end in Military wins after roughly 1–2 minutes, short of the 3–5 minute target. Economies usually reach 5–11 of 12 by then.
 - The Windows half of the updater has not been run on Windows yet.
-- No audio, no final art, no menus, no online play.
+- No audio, no menus, no online play. The art is a first pass, not final.

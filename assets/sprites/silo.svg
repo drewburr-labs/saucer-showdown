@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="400" viewBox="0 0 80 400">
+  <!-- Left team's silo. Canvas (0,0) is world (-8,260); the body spans world x 0..64
+       and y 300..660. Mirror it for the right side. Magenta = team colour. -->
+  <defs>
+    <linearGradient id="tin" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#2a2f4a"/>
+      <stop offset="0.3" stop-color="#6d7596"/>
+      <stop offset="0.45" stop-color="#8790b0"/>
+      <stop offset="0.8" stop-color="#3e4563"/>
+      <stop offset="1" stop-color="#262a42"/>
+    </linearGradient>
+    <linearGradient id="cap" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff00ff"/>
+      <stop offset="0.4" stop-color="#ff80ff"/>
+      <stop offset="1" stop-color="#800080"/>
+    </linearGradient>
+    <linearGradient id="band" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#800080"/>
+      <stop offset="0.4" stop-color="#ff00ff"/>
+      <stop offset="1" stop-color="#800080"/>
+    </linearGradient>
+  </defs>
+  <!-- body -->
+  <rect x="8" y="40" width="64" height="360" fill="url(#tin)" stroke="#140f26" stroke-width="3"/>
+  <path d="M8 84 L72 84 M8 106 L72 106 M8 128 L72 128 M8 150 L72 150 M8 172 L72 172 M8 194 L72 194 M8 216 L72 216 M8 238 L72 238 M8 260 L72 260 M8 282 L72 282 M8 304 L72 304 M8 326 L72 326 M8 348 L72 348 M8 370 L72 370 M8 392 L72 392" stroke="#1d2136" stroke-width="2"/>
+  <path d="M8 81.5 L72 81.5 M8 103.5 L72 103.5 M8 125.5 L72 125.5 M8 147.5 L72 147.5 M8 169.5 L72 169.5 M8 191.5 L72 191.5 M8 213.5 L72 213.5 M8 235.5 L72 235.5 M8 257.5 L72 257.5 M8 279.5 L72 279.5 M8 301.5 L72 301.5 M8 323.5 L72 323.5 M8 345.5 L72 345.5 M8 367.5 L72 367.5 M8 389.5 L72 389.5" stroke="#a5aecb" stroke-width="0.8" opacity="0.35"/>
+  <!-- dome cap -->
+  <path d="M5 42 Q8 6 40 4 Q72 6 75 42 Z" fill="url(#cap)" stroke="#140f26" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M18 30 Q24 14 40 10" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" opacity="0.55"/>
+  <rect x="35" y="0" width="10" height="6" rx="2" fill="#4a5170" stroke="#140f26" stroke-width="2"/>
+  <!-- team bands -->
+  <rect x="8" y="52" width="64" height="10" fill="url(#band)" stroke="#140f26" stroke-width="2"/>
+  <rect x="8" y="378" width="64" height="10" fill="url(#band)" stroke="#140f26" stroke-width="2"/>
+  <!-- gauge window (filled in code) -->
+  <rect x="28" y="74" width="24" height="296" rx="5" fill="#0c0e1c" stroke="#140f26" stroke-width="2.5"/>
+  <rect x="26" y="72" width="28" height="300" rx="7" fill="none" stroke="#a5aecb" stroke-width="1.5" opacity="0.6"/>
+  <!-- intake hatch on the field side -->
+  <rect x="58" y="118" width="16" height="88" rx="3" fill="#0c0e1c" stroke="#140f26" stroke-width="2.5"/>
+  <path d="M58 118 L74 118 L74 124 L58 124 Z M58 200 L74 200 L74 206 L58 206 Z" fill="#ff00ff" stroke="#140f26" stroke-width="1.5"/>
+  <!-- ladder on the outer side -->
+  <g stroke="#1d2136" stroke-width="2">
+    <path d="M12 60 L12 400 M20 60 L20 400"/>
+    <path d="M12 80 L20 80 M12 100 L20 100 M12 120 L20 120 M12 140 L20 140 M12 160 L20 160 M12 180 L20 180 M12 200 L20 200 M12 220 L20 220 M12 240 L20 240 M12 260 L20 260 M12 280 L20 280 M12 300 L20 300 M12 320 L20 320 M12 340 L20 340 M12 360 L20 360"/>
+  </g>
+</svg>

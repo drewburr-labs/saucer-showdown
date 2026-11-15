@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="72" viewBox="0 0 64 72">
+  <!-- Seamless ground tile. y=8 is the ground line (world y 660); blades poke above it. -->
+  <defs>
+    <linearGradient id="dirt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2c2a3e"/><stop offset="1" stop-color="#15131f"/>
+    </linearGradient>
+    <linearGradient id="turf" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4f9a5a"/><stop offset="1" stop-color="#26573a"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="18" width="64" height="54" fill="url(#dirt)"/>
+  <rect x="0" y="8" width="64" height="12" fill="url(#turf)"/>
+  <path d="M0 20 Q8 23 16 20 Q24 17 32 20 Q40 23 48 20 Q56 17 64 20 L64 22 Q56 19 48 22 Q40 25 32 22 Q24 19 16 22 Q8 25 0 22 Z" fill="#1d4030"/>
+  <g fill="#5fb06a">
+    <path d="M3 9 L5 1 L7 9 Z"/><path d="M10 9 L11 4 L13 9 Z"/><path d="M19 9 L22 2 L23 9 Z"/>
+    <path d="M28 9 L29 5 L31 9 Z"/><path d="M36 9 L38 0 L40 9 Z"/><path d="M45 9 L46 4 L48 9 Z"/>
+    <path d="M53 9 L56 2 L57 9 Z"/><path d="M60 9 L61 5 L63 9 Z"/>
+  </g>
+  <path d="M0 9 L64 9" stroke="#8fd88f" stroke-width="1.2" opacity="0.7"/>
+  <g fill="#3a3850">
+    <ellipse cx="10" cy="34" rx="3" ry="2"/><ellipse cx="40" cy="44" rx="4" ry="2.4"/>
+    <ellipse cx="54" cy="30" rx="2" ry="1.4"/><ellipse cx="24" cy="56" rx="3.4" ry="2"/><ellipse cx="50" cy="62" rx="2.4" ry="1.6"/>
+  </g>
+</svg>

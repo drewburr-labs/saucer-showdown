@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="88" height="52" viewBox="0 0 88 52">
+  <!-- Overlord saucer. Pivot (44,30) is the hitbox centre. Magenta = team colour. -->
+  <defs>
+    <linearGradient id="metal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f4f7ff"/>
+      <stop offset="0.45" stop-color="#b9c1d8"/>
+      <stop offset="1" stop-color="#6a7290"/>
+    </linearGradient>
+    <linearGradient id="belly" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4a5170"/>
+      <stop offset="1" stop-color="#262a40"/>
+    </linearGradient>
+    <linearGradient id="band" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff80ff"/>
+      <stop offset="0.5" stop-color="#ff00ff"/>
+      <stop offset="1" stop-color="#800080"/>
+    </linearGradient>
+    <radialGradient id="glass" cx="0.4" cy="0.35" r="0.75">
+      <stop offset="0" stop-color="#e8fbff" stop-opacity="0.95"/>
+      <stop offset="0.5" stop-color="#8fdcff" stop-opacity="0.75"/>
+      <stop offset="1" stop-color="#2f6f9a" stop-opacity="0.9"/>
+    </radialGradient>
+  </defs>
+  <!-- belly -->
+  <path d="M16 34 Q44 50 72 34 Z" fill="url(#belly)" stroke="#140f26" stroke-width="2.5" stroke-linejoin="round"/>
+  <ellipse cx="44" cy="43.2" rx="8" ry="2.6" fill="#ff80ff" opacity="0.9" stroke="#140f26" stroke-width="1.5"/>
+  <!-- dome -->
+  <path d="M29 24 A15 15 0 0 1 59 24 Z" fill="url(#glass)" stroke="#140f26" stroke-width="2.5"/>
+  <!-- pilot -->
+  <path d="M38.5 23 Q37 12.5 44 12 Q51 12.5 49.5 23 Z" fill="#b6c2d4"/>
+  <path d="M39.6 16.8 Q41.6 15.8 43 18.6 Q41 19.6 39.6 16.8 Z" fill="#0b0814"/>
+  <path d="M48.4 16.8 Q46.4 15.8 45 18.6 Q47 19.6 48.4 16.8 Z" fill="#0b0814"/>
+  <path d="M33.5 17 Q36 11.5 41.5 11" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" opacity="0.85"/>
+  <!-- upper hull -->
+  <path d="M6 30 Q12 21 30 22.5 L58 22.5 Q76 21 82 30 Q44 36 6 30 Z" fill="url(#metal)" stroke="#140f26" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M14 26 Q26 23.8 40 24" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" opacity="0.8"/>
+  <!-- team rim band -->
+  <path d="M2.5 29 Q44 37.5 85.5 29 Q87.5 33.5 83 37 Q44 46.5 5 37 Q0.5 33.5 2.5 29 Z" fill="url(#band)" stroke="#140f26" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M8 32 Q44 39.5 80 32" fill="none" stroke="#ff80ff" stroke-width="1.6" stroke-linecap="round" opacity="0.9"/>
+  <!-- light sockets (lit in code) -->
+  <g fill="#1b1530">
+    <circle cx="16" cy="35.5" r="2.4"/><circle cx="30" cy="38" r="2.4"/><circle cx="44" cy="38.8" r="2.4"/>
+    <circle cx="58" cy="38" r="2.4"/><circle cx="72" cy="35.5" r="2.4"/>
+  </g>
+</svg>

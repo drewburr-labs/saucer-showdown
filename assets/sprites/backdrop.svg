@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <!-- Night-farm backdrop for the whole screen. Stars, clouds and the ground are drawn in code. -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#04061a"/>
+      <stop offset="0.4" stop-color="#0c1140"/>
+      <stop offset="0.68" stop-color="#22195a"/>
+      <stop offset="0.82" stop-color="#4a2862"/>
+      <stop offset="0.92" stop-color="#2a1d4a"/>
+    </linearGradient>
+    <radialGradient id="neb1" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#7a3cff" stop-opacity="0.32"/><stop offset="1" stop-color="#7a3cff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="neb2" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#2bd6c8" stop-opacity="0.16"/><stop offset="1" stop-color="#2bd6c8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="neb3" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ff5fa8" stop-opacity="0.14"/><stop offset="1" stop-color="#ff5fa8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#fff4c8" stop-opacity="0.45"/>
+      <stop offset="0.35" stop-color="#ffe9a8" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#ffe9a8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="moon" cx="0.4" cy="0.38" r="0.65">
+      <stop offset="0" stop-color="#fffdf0"/><stop offset="0.7" stop-color="#ece4c2"/><stop offset="1" stop-color="#c9bf98"/>
+    </radialGradient>
+    <linearGradient id="haze" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6b4aa0" stop-opacity="0"/>
+      <stop offset="1" stop-color="#6b4aa0" stop-opacity="0.35"/>
+    </linearGradient>
+    <linearGradient id="field" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#162244"/><stop offset="1" stop-color="#0d1630"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="720" fill="url(#sky)"/>
+  <!-- nebulae and milky way -->
+  <ellipse cx="330" cy="170" rx="420" ry="150" fill="url(#neb1)"/>
+  <ellipse cx="820" cy="110" rx="360" ry="110" fill="url(#neb2)"/>
+  <ellipse cx="620" cy="300" rx="520" ry="120" fill="url(#neb3)"/>
+  <ellipse cx="640" cy="230" rx="760" ry="70" transform="rotate(-12 640 230)" fill="url(#neb2)"/>
+  <!-- moon -->
+  <circle cx="1090" cy="150" r="150" fill="url(#halo)"/>
+  <circle cx="1090" cy="150" r="38" fill="url(#moon)"/>
+  <g fill="#c8bd92" opacity="0.65">
+    <circle cx="1078" cy="138" r="7"/><circle cx="1102" cy="164" r="9"/><circle cx="1100" cy="132" r="4"/>
+    <circle cx="1072" cy="166" r="4.5"/><circle cx="1116" cy="146" r="3"/>
+  </g>
+  <!-- far mountains -->
+  <path d="M0 500 L70 460 L130 486 L210 430 L300 478 L380 450 L470 492 L560 456 L640 482 L720 440 L800 474 L880 446 L960 486 L1050 436 L1140 470 L1210 448 L1280 474 L1280 720 L0 720 Z" fill="#1b1846"/>
+  <path d="M210 430 L232 444 L222 446 L212 440 L200 448 L196 438 Z M720 440 L742 454 L730 455 L718 450 L708 456 L704 450 Z M1050 436 L1074 452 L1060 453 L1048 446 L1036 454 L1034 446 Z" fill="#3a3478" opacity="0.8"/>
+  <rect y="430" width="1280" height="160" fill="url(#haze)"/>
+  <!-- rolling hills -->
+  <path d="M0 540 Q120 506 260 528 Q400 548 520 520 Q660 490 800 524 Q940 554 1080 518 Q1180 496 1280 516 L1280 720 L0 720 Z" fill="#141a3c"/>
+  <!-- windmill -->
+  <g fill="#0b0f26">
+    <path d="M226 528 L232 470 L238 470 L244 528 Z"/>
+    <circle cx="235" cy="468" r="4"/>
+  </g>
+  <g stroke="#0b0f26" stroke-width="5" stroke-linecap="round">
+    <path d="M235 468 L235 440 M235 468 L262 476 M235 468 L215 488"/>
+  </g>
+  <!-- farmhouse with lit windows -->
+  <g>
+    <path d="M900 536 L900 504 L930 482 L960 504 L960 536 Z" fill="#0b0f26"/>
+    <path d="M952 494 L952 480 L958 480 L958 498 Z" fill="#0b0f26"/>
+    <path d="M960 536 L960 512 L1000 512 L1000 536 Z" fill="#0b0f26"/>
+    <rect x="910" y="510" width="9" height="10" fill="#ffd27a"/>
+    <rect x="941" y="510" width="9" height="10" fill="#ffb74a"/>
+    <rect x="972" y="518" width="8" height="8" fill="#ffd27a" opacity="0.8"/>
+    <rect x="926" y="492" width="8" height="7" fill="#ffd27a" opacity="0.7"/>
+  </g>
+  <!-- water tower -->
+  <g fill="#0b0f26">
+    <path d="M1150 520 L1156 470 L1160 470 L1158 520 Z M1186 520 L1180 470 L1184 470 L1190 520 Z"/>
+    <rect x="1150" y="448" width="40" height="24" rx="4"/>
+    <path d="M1148 450 L1170 436 L1192 450 Z"/>
+  </g>
+  <!-- tree line -->
+  <g fill="#0e1430">
+    <path d="M60 548 Q60 516 84 512 Q108 516 106 548 Z"/><path d="M100 552 Q98 526 118 522 Q138 526 136 552 Z"/>
+    <path d="M360 548 Q356 510 384 506 Q412 510 408 548 Z"/><path d="M400 552 Q400 530 418 526 Q436 530 434 552 Z"/>
+    <path d="M580 540 Q578 512 600 508 Q622 512 620 540 Z"/>
+    <path d="M780 546 Q776 514 802 510 Q828 514 824 546 Z"/><path d="M820 550 Q820 528 838 524 Q856 528 854 550 Z"/>
+    <path d="M1040 548 Q1038 520 1060 516 Q1082 520 1080 548 Z"/>
+  </g>
+  <!-- power line -->
+  <g stroke="#0b0f26" stroke-width="3">
+    <path d="M480 560 L480 500 M470 508 L490 508 M700 556 L700 496 M690 504 L710 504"/>
+  </g>
+  <path d="M300 520 Q390 534 480 508 Q590 528 700 504 Q790 520 880 498" stroke="#0b0f26" stroke-width="1.2" fill="none"/>
+  <!-- the near field and fence -->
+  <path d="M0 586 Q320 570 640 580 Q960 590 1280 576 L1280 720 L0 720 Z" fill="url(#field)"/>
+  <g stroke="#0f1838" stroke-width="2" opacity="0.8">
+    <path d="M0 612 Q320 600 640 606 Q960 614 1280 602" fill="none"/>
+    <path d="M0 626 Q320 614 640 620 Q960 628 1280 616" fill="none"/>
+  </g>
+  <g fill="#0f1838">
+    <rect x="20" y="600" width="5" height="40"/><rect x="120" y="596" width="5" height="40"/><rect x="220" y="594" width="5" height="40"/>
+    <rect x="320" y="594" width="5" height="40"/><rect x="420" y="596" width="5" height="40"/><rect x="820" y="602" width="5" height="40"/>
+    <rect x="920" y="602" width="5" height="40"/><rect x="1020" y="598" width="5" height="40"/><rect x="1120" y="596" width="5" height="40"/>
+    <rect x="1220" y="596" width="5" height="40"/>
+  </g>
+</svg>

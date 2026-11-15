@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="280" height="190" viewBox="0 0 280 190">
+  <!-- The barn. Top-left sits at world (500,470); the flat roof is the T2 deck. -->
+  <defs>
+    <linearGradient id="wall" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8a2b34"/><stop offset="1" stop-color="#4e1820"/>
+    </linearGradient>
+    <linearGradient id="roof" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4a3a52"/><stop offset="1" stop-color="#2a2034"/>
+    </linearGradient>
+    <linearGradient id="door" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6e2029"/><stop offset="1" stop-color="#3c1117"/>
+    </linearGradient>
+    <radialGradient id="lamp" cx="0.5" cy="0.6" r="0.6">
+      <stop offset="0" stop-color="#ffe6a0"/><stop offset="1" stop-color="#e08a2e"/>
+    </radialGradient>
+  </defs>
+  <!-- walls -->
+  <rect x="20" y="48" width="240" height="142" fill="url(#wall)" stroke="#140f26" stroke-width="3"/>
+  <path d="M34 57 L34 190 M48 57 L48 190 M62 57 L62 190 M76 57 L76 190 M90 57 L90 190 M104 57 L104 190 M118 57 L118 190 M132 57 L132 190 M146 57 L146 190 M160 57 L160 190 M174 57 L174 190 M188 57 L188 190 M202 57 L202 190 M216 57 L216 190 M230 57 L230 190 M244 57 L244 190 M258 57 L258 190 " stroke="#3a1016" stroke-width="1.4"/>
+  <path d="M23 57 L23 190 M37 57 L37 190 M51 57 L51 190 M65 57 L65 190 M79 57 L79 190 M93 57 L93 190 M107 57 L107 190 M121 57 L121 190 M135 57 L135 190 M149 57 L149 190 M163 57 L163 190 M177 57 L177 190 M191 57 L191 190 M205 57 L205 190 M219 57 L219 190 M233 57 L233 190 M247 57 L247 190 M261 57 L261 190 " stroke="#a23a44" stroke-width="0.8" opacity="0.5"/>
+  <!-- roof (mansard, flat top is the walkway) -->
+  <path d="M10 6 L270 6 L280 52 L0 52 Z" fill="url(#roof)" stroke="#140f26" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M8.0 15 L272.0 15 M24 6 L24 15 M40 6 L40 15 M56 6 L56 15 M72 6 L72 15 M88 6 L88 15 M104 6 L104 15 M120 6 L120 15 M136 6 L136 15 M152 6 L152 15 M168 6 L168 15 M184 6 L184 15 M200 6 L200 15 M216 6 L216 15 M232 6 L232 15 M248 6 L248 15 M264 6 L264 15 M6.1 24 L273.9 24 M30 15 L30 24 M46 15 L46 24 M62 15 L62 24 M78 15 L78 24 M94 15 L94 24 M110 15 L110 24 M126 15 L126 24 M142 15 L142 24 M158 15 L158 24 M174 15 L174 24 M190 15 L190 24 M206 15 L206 24 M222 15 L222 24 M238 15 L238 24 M254 15 L254 24 M270 15 L270 24 M4.1 33 L275.9 33 M20 24 L20 33 M36 24 L36 33 M52 24 L52 33 M68 24 L68 33 M84 24 L84 33 M100 24 L100 33 M116 24 L116 33 M132 24 L132 33 M148 24 L148 33 M164 24 L164 33 M180 24 L180 33 M196 24 L196 33 M212 24 L212 33 M228 24 L228 33 M244 24 L244 33 M260 24 L260 33 M2.2 42 L277.8 42 M26 33 L26 42 M42 33 L42 42 M58 33 L58 42 M74 33 L74 42 M90 33 L90 42 M106 33 L106 42 M122 33 L122 42 M138 33 L138 42 M154 33 L154 42 M170 33 L170 42 M186 33 L186 42 M202 33 L202 42 M218 33 L218 42 M234 33 L234 42 M250 33 L250 42 M266 33 L266 42 M0.2 51 L279.8 51 M16 42 L16 51 M32 42 L32 51 M48 42 L48 51 M64 42 L64 51 M80 42 L80 51 M96 42 L96 51 M112 42 L112 51 M128 42 L128 51 M144 42 L144 51 M160 42 L160 51 M176 42 L176 51 M192 42 L192 51 M208 42 L208 51 M224 42 L224 51 M240 42 L240 51 M256 42 L256 51 M272 42 L272 51" stroke="#1d1626" stroke-width="1.2" fill="none"/>
+  <path d="M0 52 L280 52 L280 57 L0 57 Z" fill="#e9e2d6" stroke="#140f26" stroke-width="2"/>
+  <!-- hayloft -->
+  <rect x="114" y="64" width="52" height="34" fill="#ffcf6a" stroke="#140f26" stroke-width="2.5"/>
+  <rect x="114" y="64" width="52" height="34" fill="url(#lamp)" opacity="0.8"/>
+  <path d="M118 98 Q124 82 134 90 Q142 80 150 90 Q158 84 162 98 Z" fill="#d9a43c" stroke="#8a5a14" stroke-width="1.2"/>
+  <path d="M112 62 L168 62 L168 100 L112 100 Z" fill="none" stroke="#e9e2d6" stroke-width="4"/>
+  <path d="M140 62 L140 100" stroke="#e9e2d6" stroke-width="3"/>
+  <!-- pulley beam -->
+  <path d="M140 57 L140 48" stroke="#2a1a14" stroke-width="5"/>
+  <!-- big doors -->
+  <rect x="86" y="110" width="108" height="80" fill="url(#door)" stroke="#140f26" stroke-width="2.5"/>
+  <rect x="88" y="112" width="51" height="78" fill="none" stroke="#e9e2d6" stroke-width="4"/>
+  <rect x="141" y="112" width="51" height="78" fill="none" stroke="#e9e2d6" stroke-width="4"/>
+  <path d="M90 114 L137 188 M137 114 L90 188 M143 114 L190 188 M190 114 L143 188" stroke="#e9e2d6" stroke-width="3.5"/>
+  <path d="M84 108 L196 108" stroke="#e9e2d6" stroke-width="4"/>
+  <!-- side windows -->
+  <g>
+    <rect x="40" y="82" width="26" height="26" fill="#ffcf6a" stroke="#140f26" stroke-width="2"/>
+    <rect x="40" y="82" width="26" height="26" fill="url(#lamp)" opacity="0.7"/>
+    <path d="M53 82 L53 108 M40 95 L66 95" stroke="#e9e2d6" stroke-width="2.6"/>
+    <rect x="38" y="80" width="30" height="30" fill="none" stroke="#e9e2d6" stroke-width="2.4"/>
+    <rect x="214" y="82" width="26" height="26" fill="#ffcf6a" stroke="#140f26" stroke-width="2"/>
+    <rect x="214" y="82" width="26" height="26" fill="url(#lamp)" opacity="0.7"/>
+    <path d="M227 82 L227 108 M214 95 L240 95" stroke="#e9e2d6" stroke-width="2.6"/>
+    <rect x="212" y="80" width="30" height="30" fill="none" stroke="#e9e2d6" stroke-width="2.4"/>
+  </g>
+  <!-- corner trim -->
+  <path d="M22 57 L22 190 M258 57 L258 190" stroke="#e9e2d6" stroke-width="4"/>
+  <!-- lantern over the door -->
+  <path d="M140 100 L140 104" stroke="#2a1a14" stroke-width="2"/>
+  <!-- hay bales by the wall -->
+  <g stroke="#7a4c10" stroke-width="1.5">
+    <rect x="28" y="168" width="34" height="22" rx="3" fill="#d9a43c"/>
+    <rect x="44" y="150" width="30" height="20" rx="3" fill="#e4b450"/>
+    <rect x="216" y="168" width="36" height="22" rx="3" fill="#d9a43c"/>
+  </g>
+  <g stroke="#a57425" stroke-width="1"><path d="M30 175 L60 175 M30 182 L60 182 M46 157 L72 157 M46 163 L72 163 M218 175 L250 175 M218 182 L250 182"/></g>
+</svg>

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="72" viewBox="0 0 80 72">
+  <!-- Probe Station cradle. Canvas (40,36) is the station centre; the base rests on
+       the platform at y=60. The glowing ring and antenna are drawn in code. -->
+  <defs>
+    <linearGradient id="m" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#d7ddf0"/><stop offset="1" stop-color="#5a6280"/>
+    </linearGradient>
+    <radialGradient id="core" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#1c2140"/><stop offset="1" stop-color="#090b18"/>
+    </radialGradient>
+  </defs>
+  <circle cx="40" cy="36" r="21" fill="url(#core)"/>
+  <!-- cradle arms -->
+  <path d="M12 38 Q12 62 40 62 Q68 62 68 38 L62 38 Q62 55 40 55 Q18 55 18 38 Z" fill="url(#m)" stroke="#140f26" stroke-width="2.4" stroke-linejoin="round"/>
+  <rect x="9" y="32" width="12" height="10" rx="3" fill="url(#m)" stroke="#140f26" stroke-width="2.2"/>
+  <rect x="59" y="32" width="12" height="10" rx="3" fill="url(#m)" stroke="#140f26" stroke-width="2.2"/>
+  <!-- base -->
+  <path d="M22 60 L58 60 L62 66 L18 66 Z" fill="#3b4160" stroke="#140f26" stroke-width="2.2" stroke-linejoin="round"/>
+  <path d="M26 62.5 L54 62.5" stroke="#8b93b3" stroke-width="1.2"/>
+  <g fill="#1b1530"><circle cx="15" cy="37" r="2"/><circle cx="65" cy="37" r="2"/></g>
+</svg>
