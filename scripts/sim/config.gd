@@ -37,6 +37,7 @@ const OV_HALF := Vector2(24, 11)
 const OV_SPEED := 300.0
 const OV_ACCEL := 1500.0
 const OV_RESPAWN := 5.0
+const OV_HP := 3 # bolts it takes to down a saucer; heals on respawn
 const BEAM_SLOW := 0.45
 const BEAM_HALF_W := 34.0
 const BEAM_RANGE := 190.0

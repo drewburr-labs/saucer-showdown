@@ -23,6 +23,7 @@ class Unit extends RefCounted:
 
 	# Overlord
 	var lives := 3
+	var hp := 3 # hits left before this life is lost
 	var beam_target = null # Cow or Unit being lifted
 
 	# Grey

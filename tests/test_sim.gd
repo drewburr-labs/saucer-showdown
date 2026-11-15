@@ -18,6 +18,7 @@ func _init() -> void:
 	_run("tractor win", _test_tractor_win)
 	_run("tractor flattens enemy greys", _test_tractor_flattens)
 	_run("economic win", _test_economic_win)
+	_run("saucer takes three hits", _test_saucer_hp)
 	_run("military win and saucer wrecks", _test_military_win)
 	_run("probe station makes a warrior", _test_station)
 	_run("enemy-owned station is locked", _test_station_locked)
@@ -116,6 +117,27 @@ func _test_economic_win() -> void:
 		sim.step()
 	_check(sim.silo[0] == Cfg.SILO_GOAL, "silo should hold 12, has %d" % sim.silo[0])
 	_check(sim.winner == 0 and sim.win_reason == Sim.Win.ECONOMIC, "team 0 should win economically")
+
+
+func _test_saucer_hp() -> void:
+	var sim := _sim(1, 1)
+	sim.cows.clear()
+	var o := sim.overlord(0)
+	o.shield_t = 0.0
+	_check(o.hp == Cfg.OV_HP, "starts at full health")
+	for i in Cfg.OV_HP - 1:
+		sim.hit(o, "warrior")
+		_check(o.alive, "still flying after %d hit(s)" % (i + 1))
+	_check(o.hp == 1 and o.lives == Cfg.OVERLORD_LIVES, "hits cost health, not lives")
+	_check(sim.events.filter(func(ev: Dictionary) -> bool: return ev["type"] == "hit").size() == Cfg.OV_HP - 1, "each hit is an event")
+	sim.hit(o, "warrior")
+	_check(not o.alive and o.lives == Cfg.OVERLORD_LIVES - 1, "the last hit downs her")
+	_steps(sim, int(Cfg.OV_RESPAWN * 60.0) + 2)
+	_check(o.alive and o.hp == Cfg.OV_HP, "respawns at full health")
+	var g := sim.unit_at(0, 1)
+	g.shield_t = 0.0
+	sim.hit(g, "overlord")
+	_check(not g.alive, "a grey still goes down in one")
 
 
 func _test_military_win() -> void:

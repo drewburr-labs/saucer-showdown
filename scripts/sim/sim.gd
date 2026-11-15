@@ -106,6 +106,7 @@ func _add_unit(team: int, kind: int, slot: int) -> void:
 	u.slot = slot
 	u.half = Cfg.OV_HALF if kind == E.Kind.OVERLORD else Cfg.GREY_HALF
 	u.lives = Cfg.OVERLORD_LIVES
+	u.hp = Cfg.OV_HP
 	u.facing = tractor_dir(1 - team)
 	u.pos = spawn_point(u)
 	units.append(u)
@@ -224,6 +225,16 @@ func _try_fire(u: E.Unit) -> void:
 		u.facing = signf(dir.x)
 
 
+## A bolt landed. Greys go down in one; a saucer takes Cfg.OV_HP.
+func hit(u: E.Unit, by: String = "") -> void:
+	if u.kind == E.Kind.OVERLORD:
+		u.hp -= 1
+		if u.hp > 0:
+			events.append({"type": "hit", "pos": u.pos, "team": u.team, "id": u.id, "hp": u.hp, "by": by})
+			return
+	kill(u, by)
+
+
 ## `by` says what did it: "overlord", "warrior" or "tractor".
 func kill(u: E.Unit, by: String = "") -> void:
 	if not u.alive:
@@ -264,6 +275,7 @@ func _respawn(u: E.Unit) -> void:
 	u.pos = spawn_point(u)
 	u.vel = Vector2.ZERO
 	u.alive = true
+	u.hp = Cfg.OV_HP
 	u.grounded = false
 	u.on_plat = -1
 	u.shield_t = Cfg.OV_SHIELD_TIME if u.kind == E.Kind.OVERLORD else Cfg.SHIELD_TIME
@@ -536,7 +548,7 @@ func _step_bolts(dt: float) -> void:
 			if not u.alive or u.team == b.team or u.shield_t > 0.0:
 				continue
 			if absf(b.pos.x - u.pos.x) <= u.half.x + 3.0 and absf(b.pos.y - u.pos.y) <= u.half.y + 3.0:
-				kill(u, "overlord" if b.from_kind == E.Kind.OVERLORD else "warrior")
+				hit(u, "overlord" if b.from_kind == E.Kind.OVERLORD else "warrior")
 				bolts.erase(b)
 				break
 
