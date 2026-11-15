@@ -1,5 +1,5 @@
 extends Node2D
-## Top bar (Overlord lives, silo count, tractor route, map score), plus the
+## Top bar (Overlord lives and hull, silo count, tractor route, map score), plus the
 ## win banner and the controls overlay.
 
 const Cfg = preload("res://scripts/sim/config.gd")
@@ -19,7 +19,7 @@ const HELP := [
 	["", "Grey: carries cows. Use next to the tractor to ride it. Down + jump drops through a platform."],
 	["", "Stand in a Probe Station with a cow to become a warrior; in a wormhole for a speed boost."],
 	["", ""],
-	["Win", "Shoot down the rival Overlord 3 times, bank 12 cows, or ride the tractor home."],
+	["Win", "Shoot down the rival Overlord 3 times (3 hits each), bank 12 cows, or ride the tractor home."],
 	["", ""],
 	["", "F1 help  ·  F2 team size (2v2 / 4v4)  ·  F3 spectate bots  ·  F5 check for update  ·  R restart  ·  Esc pause"],
 ]
@@ -28,6 +28,8 @@ var game # Main
 var _font: Font
 var _title: Font
 var _t := 0.0
+var _last_hp := [-1, -1]
+var _hp_flash := [0.0, 0.0] # per team, counts down after a hit
 
 
 func _ready() -> void:
@@ -38,6 +40,8 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_t += delta
+	for team in 2:
+		_hp_flash[team] = maxf(0.0, _hp_flash[team] - delta)
 	queue_redraw()
 
 
@@ -95,10 +99,12 @@ func _draw_team(sim: Sim, team: int) -> void:
 		if not alive:
 			draw_line(Vector2(px - 9, 39), Vector2(px + 9, 51), Color("ff5a7a"), 2.5, true)
 
+	_draw_hull(sim, team, x, left)
+
 	# Silo pips
 	var banked: int = sim.silo[team]
 	for i in Cfg.SILO_GOAL:
-		var px := (x + 130.0 + 13.0 * i) if left else (x + 420.0 - 130.0 - 13.0 * i - 10.0)
+		var px := (x + 172.0 + 12.0 * i) if left else (x + 420.0 - 172.0 - 12.0 * i - 10.0)
 		var r := Rect2(px, 37, 10, 16)
 		draw_rect(r.grow(1.5), INK)
 		if i < banked:
@@ -107,13 +113,55 @@ func _draw_team(sim: Sim, team: int) -> void:
 		else:
 			draw_rect(r, Color(c, 0.18))
 	var cow := Art.tex("cow")
-	var cx := (x + 296.0) if left else (x + 420.0 - 296.0 - 30.0)
+	var cx := (x + 322.0) if left else (x + 420.0 - 322.0 - 30.0)
 	draw_set_transform(Vector2(cx + 15, 45), 0.0, Vector2(0.55, 0.55) / Art.RS)
 	draw_texture(cow, -Vector2(22, 22) * Art.RS)
 	draw_set_transform(Vector2.ZERO)
 	var count := "%d/%d" % [banked, Cfg.SILO_GOAL]
 	var tx := (cx + 34.0) if left else (cx - 74.0)
 	_text(_title, Vector2(tx, 53), count, 19, Color.WHITE, HORIZONTAL_ALIGNMENT_LEFT if left else HORIZONTAL_ALIGNMENT_RIGHT, 70.0, true)
+
+
+## The current saucer's health, as segments beside the lives. While she's
+## down it refills with the respawn countdown.
+func _draw_hull(sim: Sim, team: int, x: float, left: bool) -> void:
+	var o = sim.overlord(team)
+	var hp: int = o.hp if o.alive else 0
+	if _last_hp[team] >= 0 and hp < _last_hp[team]:
+		_hp_flash[team] = 0.35
+	_last_hp[team] = hp
+	var seg := 14.0
+	var gap := 2.0
+	var w := seg * Cfg.OV_HP + gap * (Cfg.OV_HP - 1)
+	var x0 := (x + 112.0) if left else (x + 420.0 - 112.0 - w)
+	var r := Rect2(x0, 39, w, 12)
+	var shake: Vector2 = Vector2(sin(_t * 80.0), 0.0) * 2.0 * (_hp_flash[team] / 0.35)
+	r.position += shake
+	draw_rect(r.grow(2.0), INK)
+	var col := Color("7dffb0")
+	if hp == 2:
+		col = Color("ffd84a")
+	elif hp <= 1:
+		col = Color("ff5a7a").lerp(Color("ffb0c0"), 0.5 + 0.5 * sin(_t * 10.0))
+	var refill := 0.0
+	if not o.alive:
+		refill = clampf(1.0 - o.respawn_t / Cfg.OV_RESPAWN, 0.0, 1.0) * Cfg.OV_HP
+	for i in Cfg.OV_HP:
+		# Fill from the side nearest the lives, so hits eat from the outside in.
+		var k := i if left else Cfg.OV_HP - 1 - i
+		var sr := Rect2(r.position.x + (seg + gap) * k, r.position.y, seg, r.size.y)
+		if i < hp:
+			draw_rect(sr, col)
+			draw_rect(Rect2(sr.position.x, sr.position.y + 1, sr.size.x, 3), Color(1, 1, 1, 0.35))
+		else:
+			draw_rect(sr, Color(0.25, 0.22, 0.35, 0.6))
+			var part := clampf(refill - i, 0.0, 1.0)
+			if part > 0.0:
+				var pw := sr.size.x * part
+				var px := sr.position.x if left else sr.end.x - pw
+				draw_rect(Rect2(px, sr.position.y, pw, sr.size.y), Color(1, 1, 1, 0.22))
+	if _hp_flash[team] > 0.0:
+		draw_rect(r.grow(2.0), Color(1, 1, 1, 0.6 * _hp_flash[team] / 0.35), false, 2.0)
 
 
 func _draw_route(sim: Sim) -> void:

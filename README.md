@@ -20,7 +20,7 @@ Or open the folder in the Godot editor and press F5.
 
 | Win | Goal |
 | --- | --- |
-| Military | Shoot down the rival Overlord 3 times |
+| Military | Shoot down the rival Overlord 3 times (each saucer takes 3 hits) |
 | Economic | Bank 12 cows in your silo |
 | Tractor | Ride the farmer's tractor into your crop circle |
 
@@ -40,6 +40,7 @@ A match is best of 3 maps.
 - **Wormhole** (lower decks): stand in it with a cow for a permanent speed boost.
 - **Probed cows:** a cow the Overlord beams through a Probe Station glows, is slower to carry, and banks for 2.
 - **Cow heists:** an enemy grey that touches a cow in your beam takes it.
+- **Saucer damage:** a saucer takes 3 hits to bring down. It smokes after one and sparks after two; the bar beside its lives shows what's left. A fresh saucer is back to full.
 - **Saucer wrecks:** a downed saucer stays where it falls as a platform until its Overlord respawns.
 
 Other keys: F1 controls, F2 team size (2v2 or 4v4), F3 hand Player 1's seat to a bot and watch, F5 check for an update (and install it when one is offered), R restart, Esc pause.
@@ -126,6 +127,6 @@ To rehearse an update against a local feed, debug exports accept `-- --update-fe
 
 ## Known rough edges
 
-- Bot balance: bot-only matches currently all end in Military wins after roughly 1–2 minutes, short of the 3–5 minute target. Economies usually reach 5–11 of 12 by then.
+- Bot balance: since saucers take 3 hits, bot-only matches mostly end in Economic wins after roughly 2–3 minutes, still short of the 3–5 minute target.
 - The Windows half of the updater has not been run on Windows yet.
 - No audio, no menus, no online play. The art is a first pass, not final.

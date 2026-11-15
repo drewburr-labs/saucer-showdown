@@ -15,6 +15,11 @@ const INK := Color("140f26")
 const SKIN := Color("aab5c6")
 const FX_LIFE := 1.1
 const GREY_SCALE := 1.12 # drawn a touch larger than the hitbox so they read at a glance
+# Where a damaged saucer shows its hits: [scorch centre, crack] in pixels from its pivot.
+const SCORCHES := [
+	[Vector2(-17, -3), [Vector2(-22, -6), Vector2(-17, -3), Vector2(-19, 1), Vector2(-14, 3)]],
+	[Vector2(18, 1), [Vector2(12, -4), Vector2(17, 0), Vector2(23, -2), Vector2(21, 4)]],
+]
 
 var sim # Sim
 var labels: Dictionary = {} # unit id -> "P1"
@@ -148,6 +153,8 @@ func add_events(events: Array) -> void:
 				text = "CLAIMED"
 				_flash(p, 110.0, c)
 				_burst(p, 26, c.lightened(0.3), 60.0, 220.0, 0.8, true)
+			"hit":
+				_saucer_hit(sim.units[ev["id"]], p)
 			"kill":
 				if ev["kind"] == E.Kind.OVERLORD:
 					_explode(p, c, true)
@@ -272,11 +279,20 @@ func _draw_glow() -> void:
 			var p := u.pos + Vector2(0, bob)
 			_light(g, p + Vector2(0, 14), 46.0, Color(c, 0.35), Vector2(1.3, 0.55))
 			var sockets := [Vector2(-28, 5.5), Vector2(-14, 8), Vector2(0, 8.8), Vector2(14, 8), Vector2(28, 5.5)]
+			var dmg := Cfg.OV_HP - u.hp
 			for k in sockets.size():
 				var on := int(_t * 8.0) % sockets.size() == k
 				var q: Vector2 = p + (sockets[k] as Vector2).rotated(rot)
 				var lc := GOLD if on else c.lightened(0.6)
-				_light(g, q, 9.0 if on else 6.0, Color(lc, 0.95 if on else 0.6))
+				var la := 0.95 if on else 0.6
+				# Hits short out the lights nearest each scorch.
+				if (dmg >= 1 and k == 1) or (dmg >= 2 and k == 3):
+					la *= 0.15 if fmod(_t * 13.0 + k * 1.7, 3.0) > 0.4 else 1.0
+				_light(g, q, 9.0 if on else 6.0, Color(lc, la))
+			for k in mini(dmg, SCORCHES.size()):
+				var fl := 0.55 + 0.45 * sin(_t * 19.0 + k * 3.0) * sin(_t * 7.0 + k)
+				var q: Vector2 = p + (SCORCHES[k][0] as Vector2).rotated(rot)
+				_light(g, q, 14.0 if dmg >= 2 else 9.0, Color(1.0, 0.5, 0.15, (0.55 if dmg >= 2 else 0.3) * fl))
 			if u.in_beam:
 				_light(g, p + Vector2(0, 10), 30.0, Color(c.lightened(0.5), 0.6))
 		else:
@@ -692,17 +708,55 @@ func _draw_overlord(u: E.Unit) -> void:
 	var target := clampf(u.vel.x / Cfg.OV_SPEED, -1.0, 1.0) * 0.2
 	a["rot"] = lerpf(a["rot"], target, minf(1.0, dt * 8.0))
 	a["bob"] = sin(_t * 2.4 + u.id) * 2.5
+	var dmg := Cfg.OV_HP - u.hp
+	if dmg >= 2: # limping: a nervous wobble on top of the bob
+		a["bob"] += sin(_t * 23.0 + u.id) * 1.2
+	a["hurt"] = maxf(0.0, a.get("hurt", 0.0) - dt)
 	var p := u.pos + Vector2(0, a["bob"])
-	var rot: float = a["rot"]
+	var rot: float = a["rot"] + (sin(_t * 9.0 + u.id * 2.0) * 0.06 if dmg >= 2 else 0.0)
 	if u.shield_t > 0.0:
 		var sa := 0.35 + 0.25 * sin(_t * 20.0)
 		draw_circle(p, 36.0, Color(0.7, 0.9, 1.0, sa * 0.25), true, -1.0, true)
 		draw_arc(p, 36.0, 0.0, TAU, 40, Color(1, 1, 1, sa + 0.2), 2.0, true)
 	_tex("saucer", u.team, p, Vector2(44, 30), false, rot)
+	_draw_damage(p, rot, dmg)
+	if a["hurt"] > 0.0: # white flash on a fresh hit
+		_tex("saucer", u.team, p, Vector2(44, 30), false, rot, 1.0, Color(3.0, 3.0, 3.0, a["hurt"] / 0.18))
 	# Blaster pod on the facing side
 	var pod := p + Vector2(u.facing * 30.0, 6.0).rotated(rot)
 	draw_line(pod - Vector2(u.facing * 6.0, 0).rotated(rot), pod + Vector2(u.facing * 6.0, 0).rotated(rot), INK, 6.0, true)
 	draw_line(pod - Vector2(u.facing * 6.0, 0).rotated(rot), pod + Vector2(u.facing * 5.0, 0).rotated(rot), Color("b7bfd8"), 3.0, true)
+
+
+## Scorch marks and cracks on the hull, one set per hit taken.
+func _draw_damage(p: Vector2, rot: float, dmg: int) -> void:
+	if dmg <= 0:
+		return
+	var xf := Transform2D(rot, p)
+	var soot := Color(0.08, 0.06, 0.12)
+	for k in mini(dmg, SCORCHES.size()):
+		var sc: Array = SCORCHES[k]
+		var c: Vector2 = sc[0]
+		draw_set_transform_matrix(xf)
+		draw_circle(c, 8.0, Color(soot, 0.4), true, -1.0, true)
+		draw_circle(c + Vector2(-3.0, 1.0), 4.5, Color(soot, 0.75), true, -1.0, true)
+		draw_circle(c + Vector2(2.5, 0.0), 5.0, Color(soot, 0.85), true, -1.0, true)
+		draw_polyline(PackedVector2Array(sc[1]), INK, 2.0, true)
+		draw_circle(c + Vector2(1.0, 0.0), 1.6, Color(1.0, 0.55, 0.2, 0.9), true, -1.0, true)
+		draw_set_transform(Vector2.ZERO)
+
+
+func _saucer_hit(u: E.Unit, p: Vector2) -> void:
+	var a: Dictionary = _anim.get_or_add(u.get_instance_id(), {"rot": 0.0, "bob": 0.0})
+	a["hurt"] = 0.18
+	_flash(p, 80.0, Color(1.0, 0.85, 0.5))
+	for i in 22:
+		var v := Vector2.from_angle(_rng.randf() * TAU) * _rng.randf_range(120.0, 340.0)
+		_part(p, v, _rng.randf_range(0.25, 0.6), _rng.randf_range(1.2, 2.4), Color(1.0, _rng.randf_range(0.65, 0.95), 0.35), true, 600.0, 0.0, 2.5)
+	for i in 6:
+		var v := Vector2(_rng.randf_range(-40.0, 40.0), _rng.randf_range(-60.0, -15.0))
+		_part(p, v, _rng.randf_range(0.7, 1.1), _rng.randf_range(4.0, 7.0), Color(0.35, 0.33, 0.45, 0.6), false, -20.0, 1.5, 1.0)
+	_shake = maxf(_shake, 3.5)
 
 
 func _draw_label(u: E.Unit) -> void:
@@ -805,6 +859,8 @@ func _spawn_ambient(dt: float) -> void:
 			_part(u.pos + Vector2(-u.facing * 8.0, 10.0), Vector2(-u.facing * 30.0, -10.0), 0.35, 2.0, CYAN, true)
 		if u.kind == E.Kind.GREY and u.warrior and not u.grounded and u.in_jump and u.hover_fuel > 0.0 and _rng.randf() < 0.6 * rate:
 			_part(u.pos + Vector2(0, 22), Vector2(_rng.randf_range(-20.0, 20.0), 120.0), 0.3, 2.0, Color(1.0, 0.6, 0.2), true)
+		if u.kind == E.Kind.OVERLORD and u.hp < Cfg.OV_HP:
+			_damage_trail(u, rate)
 		if u.kind == E.Kind.OVERLORD and u.in_beam and _rng.randf() < 0.5 * rate:
 			var bottom := minf(u.pos.y + Cfg.BEAM_RANGE, Cfg.GROUND_Y)
 			var q := Vector2(u.pos.x + _rng.randf_range(-Cfg.BEAM_HALF_W, Cfg.BEAM_HALF_W) * 0.8, _rng.randf_range(u.pos.y + 20.0, bottom))
@@ -813,6 +869,27 @@ func _spawn_ambient(dt: float) -> void:
 		if _rng.randf() < 0.15 * rate:
 			var off := Vector2.from_angle(_rng.randf() * TAU) * 30.0
 			_part(p + off, -off * 1.6, 0.6, 1.5, CYAN, true, 0.0, -0.5)
+
+
+## A damaged saucer trails smoke from each scorch; badly damaged, it also
+## spits sparks.
+func _damage_trail(u: E.Unit, rate: float) -> void:
+	var dmg := Cfg.OV_HP - u.hp
+	var a: Dictionary = _anim.get(u.get_instance_id(), {})
+	var p: Vector2 = u.pos + Vector2(0, a.get("bob", 0.0))
+	var rot: float = a.get("rot", 0.0)
+	var heavy := dmg >= 2
+	for k in mini(dmg, SCORCHES.size()):
+		var q: Vector2 = p + (SCORCHES[k][0] as Vector2).rotated(rot)
+		if _rng.randf() < (0.5 if heavy else 0.3) * rate:
+			var shade := _rng.randf_range(0.18, 0.28) if heavy else _rng.randf_range(0.4, 0.5)
+			_part(q + Vector2(_rng.randf_range(-3.0, 3.0), -2.0), Vector2(_rng.randf_range(-10.0, 10.0) - u.vel.x * 0.15, -35.0),
+				_rng.randf_range(0.9, 1.4), _rng.randf_range(2.5, 4.0) if heavy else _rng.randf_range(2.0, 3.0),
+				Color(shade, shade * 0.95, shade * 1.15, 0.55), false, -15.0, 2.0, 0.6)
+		if heavy and _rng.randf() < 0.14 * rate:
+			for i in _rng.randi_range(2, 4):
+				var v := Vector2.from_angle(_rng.randf_range(-PI, 0.0)) * _rng.randf_range(60.0, 170.0)
+				_part(q, v, _rng.randf_range(0.2, 0.45), 1.3, Color(1.0, _rng.randf_range(0.7, 0.95), 0.4), true, 650.0)
 
 
 ## Muzzle flashes for bolts fired since last frame.
