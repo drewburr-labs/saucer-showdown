@@ -16,7 +16,7 @@ const HELP := [
 	"",
 	"Win a map: shoot down the rival Overlord 3 times, bank 12 cows, or ride the tractor home.",
 	"",
-	"F1 help  ·  F2 team size (2v2 / 4v4)  ·  F3 spectate bots  ·  R restart  ·  Esc pause",
+	"F1 help  ·  F2 team size (2v2 / 4v4)  ·  F3 spectate bots  ·  F5 install update  ·  R restart  ·  Esc pause",
 ]
 
 var game # Main
@@ -48,6 +48,7 @@ func _draw() -> void:
 		_draw_help()
 	else:
 		draw_string(_font, Vector2(0, Cfg.H - 10), "F1 controls", HORIZONTAL_ALIGNMENT_CENTER, Cfg.W, 12, Color(1, 1, 1, 0.45))
+	_draw_update()
 
 
 func _draw_team(sim: Sim, team: int) -> void:
@@ -112,6 +113,20 @@ func _draw_help() -> void:
 	draw_rect(Rect2(150, top, Cfg.W - 300, 22.0 * HELP.size() + 24.0), Color(0.02, 0.03, 0.08, 0.86))
 	for i in HELP.size():
 		draw_string(_font, Vector2(170, top + 28.0 + 22.0 * i), HELP[i], HORIZONTAL_ALIGNMENT_LEFT, -1.0, 15, Color(1, 1, 1, 0.92))
+
+
+func _draw_update() -> void:
+	var up = game.updater
+	if up == null:
+		return
+	draw_string(_font, Vector2(0, Cfg.H - 10), up.version, HORIZONTAL_ALIGNMENT_RIGHT, Cfg.W - 12.0, 12, Color(1, 1, 1, 0.45))
+	var status: String = up.status_text()
+	if status == "":
+		return
+	var w := _font.get_string_size(status, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 14).x + 28.0
+	draw_rect(Rect2((Cfg.W - w) * 0.5, 64, w, 26), Color(0.02, 0.03, 0.08, 0.9))
+	draw_rect(Rect2((Cfg.W - w) * 0.5, 64, w, 26), Color("ffd166"), false, 1.0)
+	draw_string(_font, Vector2(0, 82), status, HORIZONTAL_ALIGNMENT_CENTER, Cfg.W, 14, Color("ffd166"))
 
 
 func _centered(y: float, s: String, size: int, color: Color) -> void:

@@ -9,6 +9,7 @@ const Bot = preload("res://scripts/sim/bot.gd")
 const LocalInput = preload("res://scripts/input/local_input.gd")
 const ArenaView = preload("res://scripts/view/arena_view.gd")
 const Hud = preload("res://scripts/view/hud.gd")
+const Updater = preload("res://scripts/update/updater.gd")
 
 var sim: Sim
 var bots: Dictionary = {} # unit id -> Bot
@@ -18,6 +19,7 @@ var map_wins := [0, 0]
 var match_winner := -1
 var paused := false
 var show_help := true
+var updater: Updater
 
 var _win_ticks := 0
 var _help_ticks := 480 # the controls overlay hides itself after 8 s
@@ -33,6 +35,9 @@ func _ready() -> void:
 	_hud = Hud.new()
 	_hud.game = self
 	add_child(_hud)
+	updater = Updater.new()
+	add_child(updater)
+	updater.check()
 	humans["kb1"] = {"team": 0, "idx": 0}
 	_new_map()
 
@@ -126,6 +131,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			else:
 				_seat("kb1", 0, 0)
 			_refresh_labels()
+		KEY_F5:
+			updater.install()
 		KEY_R:
 			_new_match()
 		KEY_ESCAPE:

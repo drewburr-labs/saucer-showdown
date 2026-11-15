@@ -1,0 +1,117 @@
+name: Release
+
+# Publishing a GitHub release builds the game for Windows and Linux and
+# attaches both zips to it. The release's tag becomes the game's version,
+# which is what the in-game updater compares against.
+#
+# "Run workflow" builds the same zips as a downloadable artifact instead,
+# without touching any release.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to stamp into the test build
+        required: true
+        default: v0.0.0-test
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || github.run_id }}
+  cancel-in-progress: false
+
+env:
+  GODOT_VERSION: 4.7.2
+  GAME: saucer-showdown
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Take the version from the tag
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.version }}
+        run: |
+          if ! [[ "$TAG" =~ ^[0-9A-Za-z][0-9A-Za-z._+-]*$ ]]; then
+            echo "::error::Tag '$TAG' has characters that can't go in a version or file name."
+            exit 1
+          fi
+          echo "VERSION=$TAG" >> "$GITHUB_ENV"
+          sed -i -E "s|^config/version=.*|config/version=\"$TAG\"|" project.godot
+          grep -Fx "config/version=\"$TAG\"" project.godot
+
+      - name: Restore Godot and export templates
+        id: godot
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot
+            ~/.local/share/godot/export_templates
+          key: godot-${{ env.GODOT_VERSION }}-linux-windows-x86_64
+
+      - name: Download Godot and export templates
+        if: steps.godot.outputs.cache-hit != 'true'
+        run: |
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          curl -fsSL -o godot.zip "$base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          curl -fsSL -o templates.tpz "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          mkdir -p ~/godot
+          unzip -q -j godot.zip -d ~/godot
+          mv ~/godot/Godot_v*_linux.x86_64 ~/godot/godot
+          templates="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          mkdir -p "$templates"
+          # Only the two templates this build needs, out of about 2 GB.
+          unzip -q -j templates.tpz \
+            templates/version.txt \
+            templates/linux_release.x86_64 \
+            templates/windows_release_x86_64.exe \
+            -d "$templates"
+          rm godot.zip templates.tpz
+
+      - name: Import the project
+        run: ~/godot/godot --headless --path . --import
+
+      - name: Run tests
+        run: |
+          ~/godot/godot --headless --path . --script tests/test_sim.gd
+          ~/godot/godot --headless --path . --script tests/test_updater.gd
+
+      - name: Export Linux
+        run: |
+          mkdir -p build/linux
+          ~/godot/godot --headless --path . --export-release "Linux" "build/linux/$GAME.x86_64"
+          test -s "build/linux/$GAME.x86_64"
+          chmod +x "build/linux/$GAME.x86_64"
+
+      - name: Export Windows
+        run: |
+          mkdir -p build/windows
+          ~/godot/godot --headless --path . --export-release "Windows Desktop" "build/windows/$GAME.exe"
+          test -s "build/windows/$GAME.exe"
+
+      - name: Zip the builds
+        run: |
+          (cd build/linux && zip -9 -q "../$GAME-$VERSION-linux.zip" "$GAME.x86_64")
+          (cd build/windows && zip -9 -q "../$GAME-$VERSION-windows.zip" "$GAME.exe")
+          ls -l build/*.zip
+
+      - name: Attach the builds to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$VERSION" build/*.zip --clobber
+
+      - name: Keep the builds as an artifact
+        if: github.event_name != 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.GAME }}-${{ env.VERSION }}
+          path: build/*.zip
+          retention-days: 7
