@@ -16,6 +16,10 @@ const JUMP := 1
 const ACTION := 2
 const BEAM := 4
 const BOT := 128
+# Only in LocalInput packets, for the host's seating; never in a frame.
+const SWAP := 8
+const JOIN := 16
+const PLAY_BUTTONS := JUMP | ACTION | BEAM
 
 
 ## A frame with every unit left to its bot.

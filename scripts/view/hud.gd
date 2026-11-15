@@ -21,7 +21,7 @@ const HELP := [
 	["", ""],
 	["Win", "Shoot down the rival Overlord 3 times (3 hits each), bank 12 cows, or ride the tractor home."],
 	["", ""],
-	["", "F1 help  ·  F2 team size (2v2 / 4v4)  ·  F3 spectate bots  ·  F5 check for update  ·  R restart  ·  Esc pause"],
+	["", "F1 help  ·  F2 team size  ·  F3 spectate bots  ·  F5 update  ·  F6 play online  ·  R restart  ·  Esc pause"],
 ]
 
 var game # Main
@@ -58,10 +58,13 @@ func _draw() -> void:
 		_draw_banner(sim)
 	elif game.paused:
 		_draw_paused()
+	elif game.waiting_t > game.WAIT_NOTICE:
+		_draw_waiting()
 	if game.show_help:
 		_draw_help()
 	else:
-		_text(_font, Vector2(0, Cfg.H - 10), "F1 controls", 13, Color(1, 1, 1, 0.5), HORIZONTAL_ALIGNMENT_CENTER, Cfg.W)
+		_text(_font, Vector2(0, Cfg.H - 10), "F1 controls  ·  F6 online", 13, Color(1, 1, 1, 0.5), HORIZONTAL_ALIGNMENT_CENTER, Cfg.W)
+	_draw_net()
 	_draw_update()
 
 
@@ -230,7 +233,34 @@ func _draw_banner(sim: Sim) -> void:
 func _draw_paused() -> void:
 	draw_rect(Rect2(0, 0, Cfg.W, Cfg.H), Color(0.0, 0.0, 0.05, 0.45))
 	_text(_title, Vector2(0, 350), "PAUSED", 64, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, Cfg.W, true, 10)
-	_text(_font, Vector2(0, 386), "Esc to resume", 18, Color(1, 1, 1, 0.7), HORIZONTAL_ALIGNMENT_CENTER, Cfg.W)
+	var hint := "The host paused the game" if game.role == game.Role.CLIENT else "Esc to resume"
+	_text(_font, Vector2(0, 386), hint, 18, Color(1, 1, 1, 0.7), HORIZONTAL_ALIGNMENT_CENTER, Cfg.W)
+
+
+func _draw_waiting() -> void:
+	var blink := 0.6 + 0.3 * sin(_t * 4.0)
+	_text(_title, Vector2(0, 360), "WAITING FOR PLAYERS…", 30, Color(1, 1, 1, blink), HORIZONTAL_ALIGNMENT_CENTER, Cfg.W, true, 8)
+
+
+## Online status in the bottom-left corner, and passing notices under the bar.
+func _draw_net() -> void:
+	var line: String = game.net_status
+	if game.role != game.Role.OFFLINE:
+		line += "  ·  you: %s" % (game.you if game.you != "" else "watching")
+	if line != "":
+		_text(_font, Vector2(12, Cfg.H - 10), line, 13, Color(1, 1, 1, 0.6), HORIZONTAL_ALIGNMENT_LEFT, 560.0)
+	if game.notice_t <= 0.0 or game.notice == "":
+		return
+	var a := minf(1.0, game.notice_t)
+	var w := _font.get_string_size(game.notice, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 15).x + 36.0
+	var r := Rect2((Cfg.W - w) * 0.5, BAR_H + 54, w, 30)
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.04, 0.03, 0.12, 0.92 * a)
+	sb.border_color = Color(1, 1, 1, 0.35 * a)
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(15)
+	draw_style_box(sb, r)
+	_text(_font, Vector2(0, r.position.y + 21), game.notice, 15, Color(1, 1, 1, a), HORIZONTAL_ALIGNMENT_CENTER, Cfg.W)
 
 
 func _draw_help() -> void:

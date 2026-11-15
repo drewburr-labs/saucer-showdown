@@ -2,7 +2,12 @@ extends RefCounted
 ## Polls local keyboards and gamepads into one small state per device, so the
 ## game never touches Input directly. Call poll() once per tick.
 
+const InputFrame = preload("res://scripts/sim/input_frame.gd")
+
 const DEVICES := ["kb1", "kb2", "pad0", "pad1", "pad2", "pad3"]
+## A packet holds every device's state in InputFrame's 5-byte layout, with
+## SWAP and JOIN added to the button byte. It is what a machine sends the host.
+const PACKET_BYTES := 6 * InputFrame.UNIT_BYTES
 const STICK_DEADZONE := 0.25
 const AIM_DEADZONE := 0.4
 
@@ -31,8 +36,21 @@ func pressed(device: String, key: String) -> bool:
 	return _cur[device][key] and not _prev[device][key]
 
 
-func label(device: String) -> String:
-	return "P%d" % (DEVICES.find(device) + 1)
+## This tick's state of every device, packed for the host.
+func packet() -> PackedByteArray:
+	var p := blank_packet()
+	for i in DEVICES.size():
+		var s: Dictionary = _cur[DEVICES[i]]
+		InputFrame.put(p, i, s)
+		var o := i * InputFrame.UNIT_BYTES + 4
+		p[o] = p[o] | (InputFrame.SWAP if s["swap"] else 0) | (InputFrame.JOIN if s["join"] else 0)
+	return p
+
+
+static func blank_packet() -> PackedByteArray:
+	var p := PackedByteArray()
+	p.resize(PACKET_BYTES)
+	return p
 
 
 func _blank() -> Dictionary:
