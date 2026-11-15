@@ -1,0 +1,92 @@
+name: Determinism
+
+# Online play needs every machine's simulation to stay bit-for-bit identical.
+# This plays the same fixed matches on Linux and Windows, writes the sim's
+# checksum once a second, and fails if the two traces differ anywhere.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/sim/**"
+      - "tools/sim_trace.gd"
+      - "tests/test_sim.gd"
+      - ".github/workflows/determinism.yml"
+  pull_request:
+    paths:
+      - "scripts/sim/**"
+      - "tools/sim_trace.gd"
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: 4.7.2
+
+jobs:
+  trace:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            zip: linux.x86_64.zip
+            bin: Godot_v4.7.2-stable_linux.x86_64
+          - os: windows-2022
+            zip: win64.exe.zip
+            bin: Godot_v4.7.2-stable_win64_console.exe
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore Godot
+        id: godot
+        uses: actions/cache@v4
+        with:
+          path: ~/godot
+          key: godot-${{ env.GODOT_VERSION }}-${{ matrix.os }}-editor
+
+      - name: Download Godot
+        if: steps.godot.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL -o godot.zip "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_${{ matrix.zip }}"
+          mkdir -p ~/godot
+          unzip -q -j godot.zip -d ~/godot
+          rm godot.zip
+
+      - name: Import the project
+        run: ~/godot/${{ matrix.bin }} --headless --path . --import
+
+      - name: Run sim tests
+        run: ~/godot/${{ matrix.bin }} --headless --path . --script tests/test_sim.gd
+
+      - name: Write the trace
+        run: ~/godot/${{ matrix.bin }} --headless --path . --script tools/sim_trace.gd -- "$PWD/trace-${{ runner.os }}.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trace-${{ runner.os }}
+          path: trace-${{ runner.os }}.txt
+          retention-days: 14
+
+  compare:
+    needs: trace
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: trace-*
+          merge-multiple: true
+
+      - name: Linux and Windows must agree
+        run: |
+          wc -l trace-*.txt
+          if diff -u trace-Linux.txt trace-Windows.txt > trace.diff; then
+            echo "Traces match: $(wc -l < trace-Linux.txt) checkpoints."
+          else
+            echo "::error::Linux and Windows simulations diverged. First difference:"
+            head -20 trace.diff
+            exit 1
+          fi

@@ -54,8 +54,10 @@ scripts/
     config.gd          every tuning number
     map_data.gd        the night-farm map and the bots' platform graph
     entities.gd        unit, cow, bolt, wreck, tractor data
-    sim.gd             rules and physics; step() advances one tick
+    sim.gd             rules and physics; step_frame() advances one tick; snapshots
     bot.gd             bot brains (write the same inputs a human does)
+    input_frame.gd     one tick of every unit's input, packed into bytes
+    fmath.gd           sin/cos that give the same bits on every platform
   input/local_input.gd keyboards and gamepads
   update/updater.gd    update check and self-install from GitHub Releases
   view/
@@ -68,6 +70,7 @@ assets/
 tools/
   screenshot.gd        runs the game and saves screenshots
   sprite_sheet.gd      saves every sprite, in both team colours, on one sheet
+  sim_trace.gd         plays fixed matches and writes the sim's checksums
 tests/
   test_sim.gd          headless tests for every rule and win condition
   test_updater.gd      headless tests for version ordering and asset choice
@@ -75,9 +78,21 @@ tests/
 export_presets.cfg     Linux and Windows export settings
 .github/workflows/
   release.yml          builds and attaches both platforms to a release
+  determinism.yml      checks Linux and Windows simulate identically
 ```
 
-The simulation is deterministic and separate from rendering: inputs in, one fixed tick out. That is what makes it testable headless, and it is the shape rollback netcode will need later.
+The simulation is deterministic and separate from rendering: inputs in, one fixed tick out. That is what makes it testable headless, and it is the shape rollback netcode needs.
+
+## Netcode groundwork
+
+There is no online play yet, but the sim is ready for it:
+
+- **A match is its seed plus its input frames.** `Sim.step_frame()` takes one `InputFrame` per tick: 5 bytes per unit (stick axes quantised to a signed byte, plus button bits). A unit flagged `BOT` is driven by the sim's own bot, whose seed comes from the match seed, so bots need no network traffic and switching a seat between human and bot is just a different frame.
+- **Rewind:** `save_state()` and `load_state()` snapshot everything, bots included. Loading reuses objects with the same id, so the view's animations survive a rollback.
+- **Desync check:** `checksum()` is a 32-bit hash of the state, for peers to compare.
+- **Same bits everywhere:** the sim uses only `+ - * /`, `sqrt` and `floor`, which IEEE 754 defines exactly. Anything else (sin, cos, rotations) goes through `fmath.gd`. The Determinism workflow plays fixed matches on Linux and Windows and fails if their checksums ever differ. Keep new sim code to those operations too.
+
+A 4v4 tick with bots costs about 0.2 ms, so rewinding and replaying 7 ticks every frame takes under 2 ms.
 
 ## Art
 
@@ -111,6 +126,10 @@ godot --headless --path . --script tests/test_updater.gd
 godot --headless --path . --script tests/bot_stats.gd -- 3
 ```
 
+```bash
+godot --headless --path . --script tools/sim_trace.gd -- trace.txt
+```
+
 ## Releases and updates
 
 Publishing a GitHub release runs `.github/workflows/release.yml`. It stamps the release's tag into the game as its version, runs the tests, exports Linux and Windows builds, and attaches them to the release as `saucer-showdown-<tag>-linux.zip` and `saucer-showdown-<tag>-windows.zip`. Each zip holds one self-contained executable.
@@ -129,4 +148,5 @@ To rehearse an update against a local feed, debug exports accept `-- --update-fe
 
 - Bot balance: since saucers take 3 hits, bot-only matches mostly end in Economic wins after roughly 2–3 minutes, still short of the 3–5 minute target.
 - The Windows half of the updater has not been run on Windows yet.
-- No audio, no menus, no online play. The art is a first pass, not final.
+- No audio, no menus, no online play yet (see Netcode groundwork). The art is a first pass, not final.
+- The sim's events (bursts, "HEIST!" pop-ups) aren't rollback-aware yet: a replayed tick would show its effects again.
