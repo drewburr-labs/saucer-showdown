@@ -7,6 +7,8 @@ const E = preload("res://scripts/sim/entities.gd")
 const Sim = preload("res://scripts/sim/sim.gd")
 const Bot = preload("res://scripts/sim/bot.gd")
 const MapData = preload("res://scripts/sim/map_data.gd")
+const InputFrame = preload("res://scripts/sim/input_frame.gd")
+const FMath = preload("res://scripts/sim/fmath.gd")
 
 var _failed := 0
 var _current := ""
@@ -29,6 +31,11 @@ func _init() -> void:
 	_run("overlord beams a teammate", _test_beam_teammate)
 	_run("worker bot banks a cow on its own", _test_bot_runs_cow)
 	_run("bot matches stay sane", _test_bot_soak)
+	_run("deterministic trig matches sin and cos", _test_fmath)
+	_run("input frames pack and unpack", _test_input_frame)
+	_run("same seed and frames give the same match", _test_lockstep)
+	_run("snapshot restores into a fresh sim", _test_snapshot)
+	_run("rollback with wrong guesses converges", _test_rollback)
 	for s: Sim in _sims:
 		s.dispose()
 	print("\n%s" % ("ALL TESTS PASSED" if _failed == 0 else "%d TEST(S) FAILED" % _failed))
@@ -293,7 +300,7 @@ func _test_beam_teammate() -> void:
 func _test_bot_runs_cow() -> void:
 	var sim := _sim(3, 1)
 	var g := sim.unit_at(0, 1)
-	var bot := Bot.new(sim, g, 7)
+	var bot: Bot = sim.bots[g.id]
 	bot.plan = "econ"
 	bot.plan_t = 999.0
 	var ticks := 0
@@ -312,14 +319,10 @@ func _test_bot_soak() -> void:
 		for s in 6:
 			total += 1
 			var sim := Sim.new(100 + s, greys)
-			var bots: Array = []
-			for u: E.Unit in sim.units:
-				bots.append(Bot.new(sim, u, 1000 + s * 31 + u.id))
+			var frame := InputFrame.all_bots(sim.units.size())
 			var ticks := 0
 			while sim.winner < 0 and ticks < 60 * 60 * 8:
-				for b: Bot in bots:
-					b.think()
-				sim.step()
+				sim.step_frame(frame)
 				ticks += 1
 				if ticks % 600 == 0:
 					_sanity(sim)
@@ -345,3 +348,141 @@ func _sanity(sim: Sim) -> void:
 		_check(c.pos.y <= Cfg.GROUND_Y + 1.0, "cow below the ground at %s" % c.pos)
 		_check((c.state == E.CowState.LOOSE) == (c.holder == null), "cow state and holder disagree")
 	_check(sim.cows.size() <= Cfg.COW_MAX_TOTAL, "too many cows: %d" % sim.cows.size())
+
+
+# --- Netcode readiness ---------------------------------------------------
+
+## Frames for a mixed match: units in `humans` get scripted inputs that
+## change every few ticks, everyone else is left to the bots.
+func _frames(units: int, humans: Array, n: int, p_seed: int) -> Array[PackedByteArray]:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = p_seed
+	var out: Array[PackedByteArray] = []
+	var held := {}
+	for t in n:
+		var f := InputFrame.all_bots(units)
+		for i: int in humans:
+			if t % 12 == 0 or not held.has(i):
+				held[i] = {
+					"move": Vector2(rng.randf_range(-1.0, 1.0), rng.randf_range(-1.0, 1.0)),
+					"aim": Vector2(rng.randf_range(-1.0, 1.0), rng.randf_range(-1.0, 1.0)) if rng.randf() < 0.3 else Vector2.ZERO,
+					"jump": rng.randf() < 0.3, "action": rng.randf() < 0.4, "beam": rng.randf() < 0.3,
+				}
+			InputFrame.put(f, i, held[i])
+		out.append(f)
+	return out
+
+
+func _test_fmath() -> void:
+	var worst := 0.0
+	var x := -60.0
+	while x < 60.0:
+		worst = maxf(worst, absf(FMath.sin_d(x) - sin(x)))
+		worst = maxf(worst, absf(FMath.cos_d(x) - cos(x)))
+		x += 0.0137
+	_check(worst < 1e-6, "sin_d/cos_d off by %s" % worst)
+	var v := FMath.rotated(Vector2(3.0, -2.0), 0.7)
+	_check(v.distance_to(Vector2(3.0, -2.0).rotated(0.7)) < 1e-5, "rotated() disagrees: %s" % v)
+
+
+func _test_input_frame() -> void:
+	var f := InputFrame.all_bots(4)
+	_check(f.size() == 4 * InputFrame.UNIT_BYTES, "frame size")
+	InputFrame.put(f, 2, {"move": Vector2(-1.0, 1.0), "aim": Vector2(0.5, -0.25), "jump": true, "beam": true})
+	_check(InputFrame.is_bot(f, 1) and InputFrame.is_bot(f, 3), "untouched units stay bots")
+	_check(not InputFrame.is_bot(f, 2), "a put unit is human")
+	var u := E.Unit.new()
+	InputFrame.apply(f, 2, u)
+	_check(u.in_move == Vector2(-1.0, 1.0), "full deflection survives exactly: %s" % u.in_move)
+	_check(absf(u.in_aim.x - 0.5) < 0.005 and absf(u.in_aim.y + 0.25) < 0.005, "aim within a step: %s" % u.in_aim)
+	_check(u.in_jump and u.in_beam and not u.in_action, "buttons")
+	# Packing an already-quantised value gives the same bytes back.
+	var g := InputFrame.all_bots(4)
+	InputFrame.put(g, 2, {"move": u.in_move, "aim": u.in_aim, "jump": true, "beam": true})
+	_check(g == f, "re-packing is stable")
+
+
+func _test_lockstep() -> void:
+	for greys in [1, 3]:
+		var a := _sim(77, greys)
+		var b := _sim(77, greys)
+		var frames := _frames(a.units.size(), [0, a.units.size() - 1], 3000, 5)
+		var first_bad := -1
+		for t in frames.size():
+			a.step_frame(frames[t])
+			b.step_frame(frames[t])
+			if first_bad < 0 and a.checksum() != b.checksum():
+				first_bad = t
+		_check(first_bad < 0, "%dv%d: sims split at tick %d" % [greys + 1, greys + 1, first_bad])
+		_check(a.save_state() == b.save_state(), "%dv%d: final states differ" % [greys + 1, greys + 1])
+		var c := _sim(78, greys)
+		for t in 600:
+			c.step_frame(frames[t])
+		var a600 := _sim(77, greys)
+		for t in 600:
+			a600.step_frame(frames[t])
+		_check(c.checksum() != a600.checksum(), "checksum should tell different seeds apart")
+
+
+func _test_snapshot() -> void:
+	var a := _sim(9, 3)
+	var frames := _frames(a.units.size(), [1, 4], 3000, 11)
+	for t in 1500:
+		a.step_frame(frames[t])
+	var snap := a.save_state()
+	var b := _sim(9, 3)
+	b.load_state(snap)
+	_check(b.save_state() == snap, "a loaded state should save back byte for byte")
+	_check(b.tick == a.tick and b.cows.size() == a.cows.size(), "tick and cows restored")
+	var first_bad := -1
+	for t in range(1500, 3000):
+		a.step_frame(frames[t])
+		b.step_frame(frames[t])
+		if first_bad < 0 and a.checksum() != b.checksum():
+			first_bad = t
+	_check(first_bad < 0, "restored sim split from the original at tick %d" % first_bad)
+	# Loading over a live sim keeps the objects that survive.
+	var keep: Array = a.cows.duplicate()
+	var snap2 := a.save_state()
+	for t in 120:
+		a.step_frame(InputFrame.all_bots(a.units.size()))
+	a.load_state(snap2)
+	var same := 0
+	for c in a.cows:
+		if keep.has(c):
+			same += 1
+	_check(same == keep.size(), "cows should be the same objects after a rewind (%d of %d)" % [same, keep.size()])
+
+
+func _test_rollback() -> void:
+	# `truth` sees every frame on time. `peer` only learns each frame DELAY
+	# ticks late: until then it guesses by repeating the last real frame, and
+	# when a real frame arrives it rewinds to its last confirmed tick and
+	# replays. This is the loop rollback netcode runs.
+	const DELAY := 7
+	var truth := _sim(21, 3)
+	var peer := _sim(21, 3)
+	var n := truth.units.size()
+	var frames := _frames(n, [0, 3, 5], 2400, 3)
+	var truth_sums: Array[int] = []
+	for f in frames:
+		truth.step_frame(f)
+		truth_sums.append(truth.checksum())
+
+	var confirmed := peer.save_state()
+	var bad := -1
+	var t0 := Time.get_ticks_usec()
+	for t in range(DELAY, frames.size()):
+		# Frame t - DELAY has just arrived.
+		var known := t - DELAY + 1
+		peer.load_state(confirmed)
+		peer.step_frame(frames[known - 1])
+		if bad < 0 and peer.checksum() != truth_sums[known - 1]:
+			bad = known - 1
+		confirmed = peer.save_state()
+		for k in range(known, t + 1):
+			peer.step_frame(frames[known - 1]) # guess
+	var us := float(Time.get_ticks_usec() - t0) / (frames.size() - DELAY)
+	_check(bad < 0, "confirmed state split from the truth at tick %d" % bad)
+	_check(peer.tick == frames.size(), "peer should be predicting at the head (tick %d)" % peer.tick)
+	print("      4v4, rewind + %d ticks of replay every tick: %.0f us per tick" % [DELAY, us])

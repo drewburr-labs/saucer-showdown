@@ -6,7 +6,7 @@ enum CowState { LOOSE, CARRIED, BEAMED }
 
 
 class Unit extends RefCounted:
-	var id := 0
+	var id := 0 # also its index in Sim.units
 	var team := 0
 	var kind := 1 # Kind
 	var slot := 0 # index among the team's greys
@@ -48,6 +48,7 @@ class Unit extends RefCounted:
 
 
 class Cow extends RefCounted:
+	var id := 0 # unique across units, cows, bolts and wrecks
 	var pos := Vector2.ZERO
 	var vel := Vector2.ZERO
 	var half := Vector2.ZERO
@@ -60,6 +61,7 @@ class Cow extends RefCounted:
 
 
 class Bolt extends RefCounted:
+	var id := 0 # unique across units, cows, bolts and wrecks
 	var pos := Vector2.ZERO
 	var vel := Vector2.ZERO
 	var team := 0
@@ -68,6 +70,7 @@ class Bolt extends RefCounted:
 
 
 class Wreck extends RefCounted:
+	var id := 0 # unique across units, cows, bolts and wrecks
 	var pos := Vector2.ZERO
 	var vel := Vector2.ZERO
 	var half := Vector2.ZERO

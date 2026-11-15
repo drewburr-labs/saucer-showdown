@@ -4,21 +4,18 @@ extends SceneTree
 ##   godot --headless --path . --script tests/bot_stats.gd -- 3
 const E = preload("res://scripts/sim/entities.gd")
 const Sim = preload("res://scripts/sim/sim.gd")
-const Bot = preload("res://scripts/sim/bot.gd")
+const InputFrame = preload("res://scripts/sim/input_frame.gd")
 func _init() -> void:
 	var tally := {}
 	var g: int = int(OS.get_cmdline_user_args()[0]) if OS.get_cmdline_user_args().size() > 0 else 1
 	for s in 8:
 		var sim := Sim.new(100 + s, g)
-		var bots := {}
-		for u: E.Unit in sim.units:
-			bots[u.id] = Bot.new(sim, u, 1000 + s * 31 + u.id)
+		var frame := InputFrame.all_bots(sim.units.size())
 		while sim.winner < 0 and sim.time < 480.0:
+			sim.step_frame(frame)
 			var tasks := {}
-			for id in bots:
-				bots[id].think()
-				tasks[id] = bots[id].task
-			sim.step()
+			for b in sim.bots:
+				tasks[b.u.id] = b.task
 			for ev in sim.events:
 				if ev["type"] == "kill":
 					var who := "overlord" if ev["kind"] == E.Kind.OVERLORD else "grey"

@@ -1,12 +1,20 @@
 extends RefCounted
-## Deterministic match simulation. No nodes, no rendering, no wall clock: write
-## each unit's in_* fields, then call step() once per fixed tick. Humans, bots
-## and tests all drive it the same way, which also keeps the door open for
-## rollback netcode later.
+## Deterministic match simulation. No nodes, no rendering, no wall clock.
+## Feed it one InputFrame per fixed tick with step_frame(); units marked BOT in
+## the frame are driven by the sim's own bots. Tests can instead write units'
+## in_* fields and call step() directly.
+##
+## For netcode: two sims built with the same seed and fed the same frames stay
+## identical on every machine, save_state() / load_state() rewind one, and
+## checksum() says cheaply whether two of them still agree.
 
 const Cfg = preload("res://scripts/sim/config.gd")
 const E = preload("res://scripts/sim/entities.gd")
 const MapData = preload("res://scripts/sim/map_data.gd")
+const Bot = preload("res://scripts/sim/bot.gd")
+const InputFrame = preload("res://scripts/sim/input_frame.gd")
+
+const STATE_VERSION := 1
 
 enum Win { NONE, MILITARY, ECONOMIC, TRACTOR }
 const WIN_NAMES := ["", "Military", "Economic", "Tractor"]
@@ -19,13 +27,16 @@ var cows: Array = [] # E.Cow
 var bolts: Array = [] # E.Bolt
 var wrecks: Array = [] # E.Wreck
 var tractor: E.Tractor
+var bots: Array = [] # Bot, one per unit, same order as units
 var station_owner: Array[int] = [] # -1 neutral, else team
 var silo: Array[int] = [0, 0]
+var tick := 0
 var time := 0.0
 var winner := -1
 var win_reason := Win.NONE
 var events: Array[Dictionary] = [] # what happened this tick, for the view
 var _cow_t := Cfg.COW_SPAWN_EVERY
+var _next_id := 0 # every unit, cow, bolt and wreck gets a unique id
 
 
 func _init(p_seed: int = 1, p_greys: int = 1) -> void:
@@ -40,6 +51,9 @@ func _init(p_seed: int = 1, p_greys: int = 1) -> void:
 			_add_unit(team, E.Kind.GREY, i)
 	tractor = E.Tractor.new()
 	tractor.pos = map.tractor_start
+	for u: E.Unit in units:
+		# Bot seeds come from the match seed, so every peer's bots agree.
+		bots.append(Bot.new(self, u, p_seed * 1000003 + u.id * 7919 + 17))
 	for i in Cfg.COW_START:
 		_spawn_cow()
 
@@ -55,6 +69,11 @@ func dispose() -> void:
 	for w: E.Wreck in wrecks:
 		w.owner = null
 	tractor.rider = null
+	for b: Bot in bots:
+		b.sim = null
+		b.task_unit = null
+		b.task_cow = null
+	bots.clear()
 
 
 ## idx 0 is the team's Overlord, 1.. are its greys.
@@ -76,11 +95,27 @@ func tractor_dir(team: int) -> float:
 	return -1.0 if team == 0 else 1.0
 
 
+## Advance one tick from an InputFrame: humans' inputs are applied, bots think.
+func step_frame(frame: PackedByteArray) -> void:
+	if winner >= 0:
+		events.clear()
+		return
+	assert(frame.size() == units.size() * InputFrame.UNIT_BYTES, "frame is the wrong size")
+	for i in units.size():
+		if InputFrame.is_bot(frame, i):
+			bots[i].think()
+		else:
+			InputFrame.apply(frame, i, units[i])
+	step()
+
+
+## Advance one tick with whatever is already in the units' in_* fields.
 func step() -> void:
 	events.clear()
 	if winner >= 0:
 		return
 	var dt := Cfg.TICK
+	tick += 1
 	time += dt
 	_spawn_cows(dt)
 	for u: E.Unit in units:
@@ -100,7 +135,7 @@ func step() -> void:
 
 func _add_unit(team: int, kind: int, slot: int) -> void:
 	var u := E.Unit.new()
-	u.id = units.size()
+	u.id = _new_id()
 	u.team = team
 	u.kind = kind
 	u.slot = slot
@@ -214,6 +249,7 @@ func _try_fire(u: E.Unit) -> void:
 	elif u.in_move.length() > 0.5:
 		dir = u.in_move.normalized()
 	var b := E.Bolt.new()
+	b.id = _new_id()
 	b.pos = u.pos + dir * 14.0
 	b.vel = dir * Cfg.BOLT_SPEED
 	b.team = u.team
@@ -258,6 +294,7 @@ func kill(u: E.Unit, by: String = "") -> void:
 		u.lives -= 1
 		# The downed saucer stays on the map as a platform until she respawns.
 		var w := E.Wreck.new()
+		w.id = _new_id()
 		w.pos = u.pos
 		w.half = Cfg.WRECK_HALF
 		w.owner = u
@@ -402,6 +439,7 @@ func _spawn_cows(dt: float) -> void:
 
 func _spawn_cow() -> E.Cow:
 	var c := E.Cow.new()
+	c.id = _new_id()
 	c.half = Cfg.COW_HALF
 	c.pos = Vector2(rng.randf_range(map.pasture.x + 20.0, map.pasture.y - 20.0), Cfg.GROUND_Y - c.half.y)
 	cows.append(c)
@@ -607,3 +645,152 @@ func _fall_and_land(o, dt: float, can_drop: bool) -> void:
 
 func _overlap(ap: Vector2, ah: Vector2, bp: Vector2, bh: Vector2) -> bool:
 	return absf(ap.x - bp.x) <= ah.x + bh.x and absf(ap.y - bp.y) <= ah.y + bh.y
+
+
+func _new_id() -> int:
+	_next_id += 1
+	return _next_id - 1
+
+
+# --- Snapshots -----------------------------------------------------------
+# Everything that changes during a match, bots included, as plain values.
+# Links between objects are stored as ids. Loading reuses the objects that
+# already exist with the same id, so the view's per-object animation survives
+# a rollback.
+
+func save_state() -> PackedByteArray:
+	var live := {}
+	for list: Array in [units, cows, bolts, wrecks]:
+		for o in list:
+			live[o.id] = o
+	var us := []
+	for u: E.Unit in units:
+		us.append([u.pos, u.vel, u.facing, u.alive, u.respawn_t, u.shield_t, u.fire_cd,
+				u.grounded, u.on_plat, u.lives, u.hp, _ref(live, u.beam_target),
+				u.warrior, u.speedy, u.hover_fuel, _ref(live, u.carrying), u.riding,
+				_ref(live, u.held_by), u.drop_t, u.pickup_cd, u.gate_t,
+				u.in_move, u.in_aim, u.in_jump, u.in_action, u.in_beam,
+				u.prev_jump, u.prev_action])
+	var cs := []
+	for c: E.Cow in cows:
+		cs.append([c.id, c.pos, c.vel, c.state, _ref(live, c.holder), c.probed,
+				c.grounded, c.on_plat, c.wander_t])
+	var bs := []
+	for b: E.Bolt in bolts:
+		bs.append([b.id, b.pos, b.vel, b.team, b.from_kind, b.life])
+	var ws := []
+	for w: E.Wreck in wrecks:
+		ws.append([w.id, w.pos, w.vel, w.grounded, w.on_plat, _ref(live, w.owner)])
+	var bots_s := []
+	for b: Bot in bots:
+		bots_s.append([b.plan, b.plan_t, b.air_x, b.task, b.task_t,
+				_ref(live, b.task_unit), _ref(live, b.task_cow), b.task_station,
+				b.via_station, b.trigger_t, b.rng.state])
+	return var_to_bytes([STATE_VERSION, greys_per_team, tick, time, winner, win_reason,
+			_cow_t, _next_id, rng.state, silo.duplicate(), station_owner.duplicate(),
+			[tractor.pos, tractor.dir, _ref(live, tractor.rider)],
+			us, cs, bs, ws, bots_s])
+
+
+## Rewind to a state from save_state() of a sim with the same team size.
+func load_state(bytes: PackedByteArray) -> void:
+	var s: Array = bytes_to_var(bytes)
+	assert(s[0] == STATE_VERSION, "snapshot is from another version")
+	assert(s[1] == greys_per_team, "snapshot is for another team size")
+	tick = s[2]
+	time = s[3]
+	winner = s[4]
+	win_reason = s[5]
+	_cow_t = s[6]
+	_next_id = s[7]
+	rng.state = s[8]
+	silo.assign(s[9])
+	station_owner.assign(s[10])
+	events.clear()
+
+	# Pass 1: make sure every object exists and set its plain fields.
+	var live := {}
+	for u: E.Unit in units:
+		live[u.id] = u
+	var old := {}
+	for list: Array in [cows, bolts, wrecks]:
+		for o in list:
+			old[o.id] = o
+	cows = _restore(s[13], old, live, E.Cow)
+	bolts = _restore(s[14], old, live, E.Bolt)
+	wrecks = _restore(s[15], old, live, E.Wreck)
+	for id in old:
+		if not live.has(id):
+			_unlink(old[id]) # gone in the restored state
+
+	# Pass 2: plain fields that need nothing else, then the links.
+	var us: Array = s[12]
+	for i in units.size():
+		var u: E.Unit = units[i]
+		var a: Array = us[i]
+		u.pos = a[0]; u.vel = a[1]; u.facing = a[2]; u.alive = a[3]
+		u.respawn_t = a[4]; u.shield_t = a[5]; u.fire_cd = a[6]; u.grounded = a[7]
+		u.on_plat = a[8]; u.lives = a[9]; u.hp = a[10]; u.beam_target = live.get(a[11])
+		u.warrior = a[12]; u.speedy = a[13]; u.hover_fuel = a[14]
+		u.carrying = live.get(a[15]); u.riding = a[16]; u.held_by = live.get(a[17])
+		u.drop_t = a[18]; u.pickup_cd = a[19]; u.gate_t = a[20]
+		u.in_move = a[21]; u.in_aim = a[22]; u.in_jump = a[23]; u.in_action = a[24]
+		u.in_beam = a[25]; u.prev_jump = a[26]; u.prev_action = a[27]
+	for i in cows.size():
+		cows[i].holder = live.get(s[13][i][4])
+	for i in wrecks.size():
+		wrecks[i].owner = live.get(s[15][i][5])
+	var tr: Array = s[11]
+	tractor.pos = tr[0]
+	tractor.dir = tr[1]
+	tractor.rider = live.get(tr[2])
+	var bots_s: Array = s[16]
+	for i in bots.size():
+		var b: Bot = bots[i]
+		var a: Array = bots_s[i]
+		b.plan = a[0]; b.plan_t = a[1]; b.air_x = a[2]; b.task = a[3]; b.task_t = a[4]
+		b.task_unit = live.get(a[5]); b.task_cow = live.get(a[6]); b.task_station = a[7]
+		b.via_station = a[8]; b.trigger_t = a[9]; b.rng.state = a[10]
+
+
+## A 32-bit fingerprint of the whole state. Peers compare these to catch a
+## desync on the tick it happens.
+func checksum() -> int:
+	var h := HashingContext.new()
+	h.start(HashingContext.HASH_MD5)
+	h.update(save_state())
+	return h.finish().decode_u32(0)
+
+
+func _ref(live: Dictionary, o) -> int:
+	# A link to something no longer in the match (a bot remembering a cow that
+	# was banked) saves as none; the bot treats both the same.
+	return o.id if o != null and live.get(o.id) == o else -1
+
+
+func _restore(rows: Array, old: Dictionary, live: Dictionary, cls) -> Array:
+	var out := []
+	for a: Array in rows:
+		var o = old.get(a[0])
+		if o == null:
+			o = cls.new()
+			o.id = a[0]
+		live[o.id] = o
+		out.append(o)
+		if cls == E.Cow:
+			o.half = Cfg.COW_HALF
+			o.pos = a[1]; o.vel = a[2]; o.state = a[3]; o.probed = a[5]
+			o.grounded = a[6]; o.on_plat = a[7]; o.wander_t = a[8]
+		elif cls == E.Bolt:
+			o.pos = a[1]; o.vel = a[2]; o.team = a[3]; o.from_kind = a[4]; o.life = a[5]
+		else:
+			o.half = Cfg.WRECK_HALF
+			o.pos = a[1]; o.vel = a[2]; o.grounded = a[3]; o.on_plat = a[4]
+	return out
+
+
+func _unlink(o) -> void:
+	if o is E.Cow:
+		o.holder = null
+	elif o is E.Wreck:
+		o.owner = null

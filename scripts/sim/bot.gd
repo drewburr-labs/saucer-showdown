@@ -5,6 +5,7 @@ extends RefCounted
 const Cfg = preload("res://scripts/sim/config.gd")
 const E = preload("res://scripts/sim/entities.gd")
 const MapData = preload("res://scripts/sim/map_data.gd")
+const FMath = preload("res://scripts/sim/fmath.gd")
 
 # Radians either way; bots shouldn't be snipers, least of all against saucers.
 const AIM_ERROR := 0.2
@@ -267,7 +268,7 @@ func _overlord() -> void:
 				u.in_beam = false
 	# Weave, so a hovering saucer isn't a sitting duck.
 	if task == "hunt" or (threatened and u.fire_cd > 0.0):
-		move += Vector2(0.35 * cos(sim.time * 3.1 + u.id), 0.7 * sin(sim.time * 4.3 + u.id * 2.0))
+		move += Vector2(0.35 * FMath.cos_d(sim.time * 3.1 + u.id), 0.7 * FMath.sin_d(sim.time * 4.3 + u.id * 2.0))
 	u.in_move = move.limit_length(1.0)
 
 	trigger_t -= Cfg.TICK
@@ -392,7 +393,7 @@ func _shot_target():
 
 func _aim_at(t: E.Unit) -> Vector2:
 	var err := AIM_ERROR_VS_OVERLORD if t.kind == E.Kind.OVERLORD else AIM_ERROR
-	return (t.pos - u.pos).normalized().rotated(rng.randf_range(-err, err))
+	return FMath.rotated((t.pos - u.pos).normalized(), rng.randf_range(-err, err))
 
 
 func _fly(dest: Vector2) -> Vector2:
