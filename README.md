@@ -47,13 +47,14 @@ Other keys: F1 controls, F2 team size (2v2 or 4v4), F3 hand Player 1's seat to a
 
 ## Play online
 
-Press **F6**. One player picks **Host a game**; the panel shows the address friends type into **Join**. Each machine's first keyboard takes a seat straight away and goes on the smaller team; anyone else at that machine joins with Enter or Start, just like couch play. Bots fill every empty seat, and take over when someone leaves. Players can join a match already in progress.
+Press **F6**. One player picks **Host a game** and gets a five-letter room code; friends type it into **Join**. Games go through the Saucer Showdown relay server (`saucer.drewburr.com`), so nobody has to forward ports. Each machine's first keyboard takes a seat straight away and goes on the smaller team; anyone else at that machine joins with Enter or Start, just like couch play. Bots fill every empty seat, and take over when someone leaves. Players can join a match already in progress.
 
 - Everyone needs the same build; a mismatched one is turned away with the two versions named.
 - Only the host can pause, restart, or change the team size. Anyone can move the win banner on.
-- It works on a LAN, or over the internet if the host forwards **UDP port 24680** on their router. There's no matchmaking or relay yet.
 - Online play uses rollback netcode: your own moves show at once (after 2 ticks, about 33 ms, of input delay) and other players' are predicted, then corrected when their real input arrives. A correction can make a remote player jump a little. The game only waits ("Waiting for players…") if a connection falls more than 200 ms behind.
-- From the command line: `--host`, `--join=ADDRESS[:PORT]`, `--port=N`, and `--lag=MS` to fake a slow connection for testing (after `--`). `--lag` delays every packet this machine sends; the ping shown doesn't include it.
+- The ping shown is the real round trip to the host, through the relay.
+- From the command line (after `--`): `--join=CODE` joins a room; `--relay=HOST[:PORT]` uses a different relay (say, one running locally); `--lag=MS` delays every packet this machine sends, to fake a slow connection.
+- Direct play without the relay, for a LAN or development: `--host` (with `--port=N`) hosts on this machine, and `--join=ADDRESS[:PORT]` joins it. The host needs UDP port 24680 reachable.
 
 ## Layout
 
@@ -69,7 +70,11 @@ scripts/
     input_frame.gd     one tick of every unit's input, packed into bytes
     fmath.gd           sin/cos that give the same bits on every platform
   input/local_input.gd keyboards and gamepads, packed into one packet per tick
-  net/net_peer.gd      ENet transport and message protocol for online play
+  net/net_peer.gd      game message protocol, and the direct ENet transport
+  net/relay_link.gd    the same, through the relay server
+  net/relay_protocol.gd  the relay's wire format, address and room codes
+  relay/relay_server.gd  the relay: rooms, codes, forwarding
+  relay/run_relay.gd   the relay's entry point (the Docker image runs this)
   update/updater.gd    update check and self-install from GitHub Releases
   view/
     arena_view.gd      draws the arena from sim state: sprites, animation, particles, glow
@@ -83,6 +88,7 @@ tools/
   screenshot.gd        runs the game and saves screenshots
   sprite_sheet.gd      saves every sprite, in both team colours, on one sheet
   sim_trace.gd         plays fixed matches and writes the sim's checksums
+  relay_probe.gd       checks a relay end to end: open a room, join it, pass packets
 tests/
   test_sim.gd          headless tests for every rule and win condition
   test_updater.gd      headless tests for version ordering and asset choice
@@ -92,6 +98,8 @@ export_presets.cfg     Linux and Windows export settings
 .github/workflows/
   release.yml          builds and attaches both platforms to a release
   determinism.yml      checks Linux and Windows simulate identically
+  relay-image.yml      builds, smoke-tests and pushes the relay's container image
+Dockerfile             the relay server's image
 ```
 
 The simulation is deterministic and separate from rendering: inputs in, one fixed tick out. That is what makes it testable headless, and it is the shape rollback netcode needs.
@@ -159,6 +167,29 @@ godot --headless --path . --script tests/bot_stats.gd -- 3
 godot --headless --path . --script tools/sim_trace.gd -- trace.txt
 ```
 
+```bash
+godot --headless --path . --script tools/relay_probe.gd -- 127.0.0.1:24680
+```
+
+## Relay server
+
+Online games go through a small relay so players behind home routers can connect. The host opens a room and gets a code; friends join with the code; the relay passes each room's packets between its host and clients without reading them. It's the relay's own GDScript (`scripts/relay/`) running on a headless Godot, packaged as a container.
+
+- **Image:** `ghcr.io/drewburr-labs/saucer-showdown-relay`. Every push to `main` builds it for linux/amd64 and linux/arm64, checks it with `tools/relay_probe.gd`, and tags it `latest` and `sha-<commit>`.
+- **Run it:** `docker run -p 24680:24680/udp ghcr.io/drewburr-labs/saucer-showdown-relay`. It needs **UDP** port 24680 reachable from the internet (an HTTP proxy or tunnel won't carry it). It's stateless and logs to stdout; an idle relay uses well under 1% of a core and about 35 MB.
+- **Address:** the game connects to `saucer.drewburr.com:24680` (`HOST_NAME` and `PORT` in `scripts/net/relay_protocol.gd`).
+- **Check a deployment:** `godot --headless --path . --script tools/relay_probe.gd -- saucer.drewburr.com` opens a room, joins it and passes a packet each way.
+- **Limits:** 7 clients per room, 400 rooms, 1024 connections; 20 wrong room codes per address per minute.
+- **Compatibility:** the relay doesn't read game messages, so it only needs redeploying when `VERSION` in `relay_protocol.gd` changes. A game with a different `VERSION` is told to update.
+
+```bash
+docker build -t saucer-showdown-relay .
+```
+
+```bash
+docker run --rm -p 24680:24680/udp saucer-showdown-relay
+```
+
 ## Releases and updates
 
 Publishing a GitHub release runs `.github/workflows/release.yml`. It stamps the release's tag into the game as its version, runs the tests, exports Linux and Windows builds, and attaches them to the release as `saucer-showdown-<tag>-linux.zip` and `saucer-showdown-<tag>-windows.zip`. Each zip holds one self-contained executable.
@@ -178,5 +209,5 @@ To rehearse an update against a local feed, debug exports accept `-- --update-fe
 - Bot balance: since saucers take 3 hits, bot-only matches mostly end in Economic wins after roughly 2–3 minutes, still short of the 3–5 minute target.
 - The Windows half of the updater has not been run on Windows yet.
 - No audio and no main menu. The art is a first pass, not final.
-- Online: no NAT traversal or relay, so internet play needs a forwarded port.
+- Online: all games go through the one relay, so players far from it get a longer ping. There's no matchmaking: you share a room code.
 - Online: a rollback correction moves remote players instantly instead of smoothing them into place, and an effect from a wrong prediction (say, a hit that didn't happen) stays on screen.

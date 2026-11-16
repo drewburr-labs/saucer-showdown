@@ -16,6 +16,7 @@ Godot 4.7 (standard build, GL Compatibility) team arcade brawler. See README.md 
 
 - `scripts/sim/` is the whole game as a deterministic simulation with no nodes or rendering. Keep it that way: rendering must never feed back into the sim.
 - `scripts/view/` draws the sim's state each frame. `art.gd` loads the SVG sprites in `assets/sprites/` and recolours magenta placeholders (`#ff00ff`, `#800080`, `#ff80ff`) per team.
+- `scripts/relay/` is the relay server, shipped as the Docker image (`Dockerfile`, `.github/workflows/relay-image.yml`). It only depends on `scripts/net/relay_protocol.gd`; keep it that way, and bump `VERSION` there when the relay's wire format changes. The game reaches the relay at `HOST_NAME` in that file.
 - SVG sprites are imported as "keep" (each has a `.svg.import` with `importer="keep"`); new sprites need that file too. The SVG renderer ignores `<pattern>` fills.
 
 ## Commands
