@@ -16,8 +16,9 @@ extends Node2D
 ##
 ## Outside a match the game sits in the menus (menus.gd) with a bot match
 ## playing behind them. Online, the room waits in the lobby between matches:
-## everyone names themselves and picks a team, the host picks the team size
-## and starts, and when the match is decided everyone comes back.
+## everyone names themselves and picks a seat (a team, and whether they fly
+## its Overlord or play a Grey), the host picks the team size and starts, and
+## when the match is decided everyone comes back.
 
 const Cfg = preload("res://scripts/sim/config.gd")
 const E = preload("res://scripts/sim/entities.gd")
@@ -47,12 +48,16 @@ const WAIT_NOTICE := 30 # ticks stalled before the HUD says so
 const PING_EVERY := 60 # clients time a round trip to the host this often
 const BACK_TO_LOBBY := 600 # ticks after a match is won before everyone goes back on their own
 const TEAM_SIZES := [1, 2, 3] # greys per team: 2v2, 3v3, 4v4
+## What a player plays: a team's one Overlord (its saucer), or one of its Greys.
+const OVERLORD := 0
+const GREY := 1
+const ROLE_NAMES := ["Overlord", "Grey"]
 
 var sim: Sim # the match, or the bots playing behind the menus
 var in_match := false
 var humans: Dictionary = {} # host: "peer:device" -> {"team": int, "idx": int}; idx 0 is the Overlord
 var greys_per_team := 1 # 1 = 2v2, 2 = 3v3, 3 = 4v4
-var lobby: Array = [] # online: [{"id": peer id, "name": String, "team": int}], in join order
+var lobby: Array = [] # online: [{"id": peer id, "name": String, "team": int, "role": OVERLORD or GREY}], in join order
 var in_lobby := false # online: the host has us in its room
 var player_name := "" # what this machine's player is called online
 var map_wins := [0, 0]
@@ -276,7 +281,7 @@ func _go_offline(reason: String) -> void:
 func _open_lobby() -> void:
 	_end_local_match()
 	in_lobby = true
-	lobby = [{"id": LOCAL, "name": player_name, "team": 0}]
+	lobby = [{"id": LOCAL, "name": player_name, "team": 0, "role": OVERLORD}]
 
 
 func _end_local_match() -> void:
@@ -297,23 +302,36 @@ func _host_address() -> String:
 
 # --- Matches -------------------------------------------------------------
 
-## Play on this machine against bots; with "extra_players" on, more local
-## players join with Enter or A.
-func start_local(greys: int) -> void:
+## Play on this machine against bots, as the Overlord or a Grey (the saved
+## choice when not given); with "extra_players" on, more local players join
+## with Enter or A.
+func start_local(greys: int, as_role := -1) -> void:
 	if role != Role.OFFLINE:
 		leave()
+	if as_role in [OVERLORD, GREY]:
+		Settings.set_value("role", as_role)
 	greys_per_team = greys
-	humans = {_key(LOCAL, "kb1"): {"team": 0, "idx": 0}}
+	humans = {_key(LOCAL, "kb1"): {"team": 0, "idx": _local_idx()}}
 	_start_match()
 
 
-## Host: everyone in the lobby takes a seat on the team they picked.
+## The unit Player 1 starts on offline: the Overlord (0) or the first Grey.
+func _local_idx() -> int:
+	return 0 if Settings.value("role") == OVERLORD else 1
+
+
+## Host: everyone in the lobby takes the seat they picked.
 func start_match() -> void:
 	if role != Role.HOST or in_match:
 		return
 	humans.clear()
+	var next_grey := [1, 1]
 	for e: Dictionary in lobby:
-		humans[_key(e["id"], "kb1")] = {"team": e["team"], "idx": 0}
+		var idx := 0
+		if e["role"] == GREY:
+			idx = next_grey[e["team"]]
+			next_grey[e["team"]] += 1
+		humans[_key(e["id"], "kb1")] = {"team": e["team"], "idx": idx}
 	_start_match()
 	_send_lobby()
 
@@ -789,19 +807,20 @@ func _host_msg(id: int, m: Array) -> void:
 			if name == "":
 				name = "Player %d" % (lobby.size() + 1)
 			var team := 0 if _team_count(0) <= _team_count(1) else 1
-			lobby.append({"id": id, "name": name, "team": team})
+			var r := _free_role(team, OVERLORD, id)
+			lobby.append({"id": id, "name": name, "team": team, "role": r})
 			p["greeted"] = true
 			p["from"] = _confirmed
 			if in_match:
 				# Mid-match: straight into a free seat on the smaller team.
 				_send_start(id)
-				_seat(_key(id, "kb1"), team, 0)
+				_seat(_key(id, "kb1"), team, 0 if r == OVERLORD else 1)
 				_refresh_labels()
 			_send_lobby()
 			_say("%s joined." % name)
 		Msg.TEAM:
-			if p["greeted"] and NetPeer.valid(m, [TYPE_INT]):
-				_set_team(id, m[1])
+			if p["greeted"] and NetPeer.valid(m, [TYPE_INT, TYPE_INT]):
+				_set_seat(id, m[1], m[2])
 		Msg.NAME:
 			if p["greeted"] and NetPeer.valid(m, [TYPE_STRING]):
 				_rename(id, m[1])
@@ -867,8 +886,9 @@ func _client_msg(m: Array) -> void:
 				return
 			var list := []
 			for e in m[3]:
-				if e is Array and e.size() == 3 and e[0] is int and e[1] is String and e[2] is int and e[2] in [0, 1]:
-					list.append({"id": e[0], "name": e[1], "team": e[2]})
+				if e is Array and e.size() == 4 and e[0] is int and e[1] is String and e[2] is int and e[2] in [0, 1] \
+						and e[3] is int and e[3] in [OVERLORD, GREY]:
+					list.append({"id": e[0], "name": e[1], "team": e[2], "role": e[3]})
 			lobby = list
 			in_lobby = true
 			if not in_match:
@@ -936,25 +956,68 @@ func my_id() -> int:
 	return net.id() if net != null else LOCAL
 
 
-## Ask to play for `team`. The host has the last word, and a full team says no.
+## How many of a team's seats are for `r`: one Overlord, the rest Greys.
+func seats_for(r: int) -> int:
+	return 1 if r == OVERLORD else greys_per_team
+
+
+## Players on `team` playing `r`, leaving out `except_id`.
+func _role_count(team: int, r: int, except_id := -1) -> int:
+	var n := 0
+	for e: Dictionary in lobby:
+		if e["team"] == team and e["role"] == r and e["id"] != except_id:
+			n += 1
+	return n
+
+
+## `want` if `team` has that seat free for `id`, else its other role, else -1.
+func _free_role(team: int, want: int, id := -1) -> int:
+	for r: int in [want, 1 - want]:
+		if _role_count(team, r, id) < seats_for(r):
+			return r
+	return -1
+
+
+## This machine's lobby entry, or {} when not in one.
+func my_entry() -> Dictionary:
+	var me := my_id()
+	for e: Dictionary in lobby:
+		if e["id"] == me:
+			return e
+	return {}
+
+
+## Ask to play for `team`, keeping our role if that seat is free there. The
+## host has the last word, and a full team says no.
 func pick_team(team: int) -> String:
-	if not in_lobby or in_match:
-		return ""
-	if _team_count(team) >= 1 + greys_per_team:
+	var mine := my_entry()
+	var r := _free_role(team, mine.get("role", OVERLORD), my_id())
+	if r < 0 and in_lobby and not in_match:
 		return "%s is full." % Cfg.TEAM_NAMES[team]
+	return pick_seat(team, r)
+
+
+## Ask for a seat: `team`'s Overlord or one of its Greys. Returns "" or why not.
+func pick_seat(team: int, r: int) -> String:
+	if not in_lobby or in_match or not team in [0, 1] or not r in [OVERLORD, GREY]:
+		return ""
+	if _role_count(team, r, my_id()) >= seats_for(r):
+		return "%s's %s seat%s taken." % [Cfg.TEAM_NAMES[team], ROLE_NAMES[r],
+				" is" if seats_for(r) == 1 else "s are all"]
 	if role == Role.CLIENT:
-		net.send(LOCAL, [Msg.TEAM, team])
+		net.send(LOCAL, [Msg.TEAM, team, r])
 	else:
-		_set_team(LOCAL, team)
+		_set_seat(LOCAL, team, r)
 	return ""
 
 
-func _set_team(id: int, team: int) -> void:
-	if in_match or not team in [0, 1] or _team_count(team) >= 1 + greys_per_team:
+func _set_seat(id: int, team: int, r: int) -> void:
+	if in_match or not team in [0, 1] or not r in [OVERLORD, GREY] or _role_count(team, r, id) >= seats_for(r):
 		return
 	for e: Dictionary in lobby:
-		if e["id"] == id and e["team"] != team:
+		if e["id"] == id and (e["team"] != team or e["role"] != r):
 			e["team"] = team
+			e["role"] = r
 			_send_lobby()
 
 
@@ -965,13 +1028,20 @@ func set_team_size(greys: int) -> String:
 	if lobby.size() > 2 * (1 + greys):
 		return "%d players won't fit in a %s." % [lobby.size(), size_name(greys)]
 	greys_per_team = greys
-	# Anyone over the new size moves to the other team, newest first.
+	# Greys over the new size move, newest first: to their own team's Overlord
+	# seat if it's free, else to the other team.
 	for team in 2:
 		for i in range(lobby.size() - 1, -1, -1):
-			if _team_count(team) <= 1 + greys:
+			if _role_count(team, GREY) <= greys:
 				break
-			if lobby[i]["team"] == team:
-				lobby[i]["team"] = 1 - team
+			var e: Dictionary = lobby[i]
+			if e["team"] != team or e["role"] != GREY:
+				continue
+			if _role_count(team, OVERLORD) == 0:
+				e["role"] = OVERLORD
+			else:
+				e["role"] = _free_role(1 - team, GREY, e["id"])
+				e["team"] = 1 - team
 	_send_lobby()
 	return ""
 
@@ -1021,7 +1091,7 @@ func _send_lobby() -> void:
 		return
 	var entries := []
 	for e: Dictionary in lobby:
-		entries.append([e["id"], e["name"], e["team"]])
+		entries.append([e["id"], e["name"], e["team"], e["role"]])
 	net.send(0, [Msg.LOBBY, greys_per_team, in_match, entries])
 
 
@@ -1159,7 +1229,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			if humans.has(k1):
 				humans.erase(k1)
 			else:
-				_seat(k1, 0, 0)
+				_seat(k1, 0, _local_idx())
 			_refresh_labels()
 		KEY_F5:
 			updater.install()

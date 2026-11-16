@@ -25,6 +25,7 @@ const DEFAULTS := {
 	"max_fps": 0,
 	"show_fps": false,
 	"extra_players": false, # more players at this machine can join (Enter, or a gamepad's jump)
+	"role": 0, # what Player 1 plays in local games: 0 the Overlord, 1 a Grey (Main.OVERLORD / GREY)
 }
 
 ## Rebindable actions, in the order the controls page lists them.

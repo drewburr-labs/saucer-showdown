@@ -19,6 +19,14 @@ const PadKeyboard = preload("res://scripts/ui/pad_keyboard.gd")
 ## these puts it back on the page instead.
 const NAV_ACTIONS := ["ui_up", "ui_down", "ui_left", "ui_right", "ui_accept", "ui_focus_next", "ui_focus_prev"]
 
+## What each role does, by Main.OVERLORD / GREY.
+const ROLE_BLURBS := [
+	"Fly your team's saucer: shoot, beam up cows and teammates, claim Probe Stations.",
+	"Run and jump: carry cows to your silo, become a warrior, ride the tractor.",
+]
+## Each role's sprite, for the role buttons and the lobby's seats.
+const ROLE_SPRITES := ["saucer", "grey"]
+
 var game # Main
 
 var _root: Control
@@ -36,6 +44,8 @@ var _update_btn: Button
 var _local_btns: Array[Button] = []
 var _local_greys := 1
 var _local_blurb: Label
+var _role_btns: Array[Button] = [] # local setup: play the Overlord or a Grey
+var _role_blurb: Label
 var _p2_btns: Array[Button] = [] # the "2nd player" toggles, on the local and lobby pages
 var _online_name: LineEdit
 var _code: LineEdit
@@ -48,13 +58,15 @@ var _room_hint: Label
 var _size_btns: Array[Button] = []
 var _team_heads: Array[Label] = []
 var _team_lists: Array[VBoxContainer] = []
-var _team_btns: Array[Button] = []
 var _lobby_name: LineEdit
 var _count: Label
 var _room_note: Label
 var _start_btn: Button
+var _lobby_p2: Button
 var _waiting: Label
 var _lobby_sig := ""
+
+const SEAT_H := 38 # a lobby seat row's height
 
 var _pause_note: Label
 var _pause_btns := {} # name -> Button
@@ -310,10 +322,14 @@ func _refresh() -> void:
 		"local":
 			var who := "Player 2 joins with %s and gamepads with %s, at any time." % [_p2_key(), _pad_join()] \
 					if Settings.value("extra_players") else "Any keyboard or gamepad plays as you."
-			_local_blurb.text = "You're Player 1 on %s. %s Bots fill every other seat. Best of 3 maps." % [
-					Cfg.TEAM_NAMES[0], who]
+			var r: int = Settings.value("role")
+			_local_blurb.text = "You're Player 1 on %s, as %s. %s Bots fill every other seat. Best of 3 maps." % [
+					Cfg.TEAM_NAMES[0], "the Overlord" if r == game.OVERLORD else "a Grey", who]
 			for i in _local_btns.size():
 				_local_btns[i].set_pressed_no_signal(game.TEAM_SIZES[i] == _local_greys)
+			for i in _role_btns.size():
+				_role_btns[i].set_pressed_no_signal(i == r)
+			_role_blurb.text = ROLE_BLURBS[r] + " %s switches unit mid-match." % _swap_key()
 		"online":
 			_refresh_online()
 		"lobby":
@@ -427,6 +443,20 @@ func _build_local() -> void:
 		b.pressed.connect(func() -> void: _local_greys = greys)
 		sizes.add_child(b)
 		_local_btns.append(b)
+	box.add_child(UI.label("You play", 15, UI.DIM))
+	var roles := UI.row()
+	box.add_child(roles)
+	for r in 2:
+		var b := _role_button(r, 0)
+		b.toggle_mode = true
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.custom_minimum_size.y = 52
+		b.pressed.connect(func() -> void: Settings.set_value("role", r))
+		roles.add_child(b)
+		_role_btns.append(b)
+	_role_blurb = UI.label("", 15, UI.DIM, true)
+	box.add_child(_role_blurb)
+	box.add_child(UI.spacer(2))
 	_local_blurb = UI.label("", 16, UI.DIM, true)
 	box.add_child(_local_blurb)
 	var p2 := _p2_toggle()
@@ -557,15 +587,9 @@ func _build_lobby() -> void:
 		head.add_child(count)
 		_team_heads.append(count)
 		var list := UI.column(6)
-		list.custom_minimum_size = Vector2(0, 4 * 34 - 6)
+		list.custom_minimum_size = Vector2(0, 4 * SEAT_H + 3 * 6)
 		col.add_child(list)
 		_team_lists.append(list)
-		var join := UI.button("", func() -> void:
-			var err: String = game.pick_team(team)
-			if err != "":
-				game._say(err))
-		col.add_child(join)
-		_team_btns.append(join)
 
 	var name_row := UI.row()
 	box.add_child(name_row)
@@ -593,7 +617,8 @@ func _build_lobby() -> void:
 		game.leave())
 	bottom.add_child(leave)
 	bottom.add_child(UI.button("Settings", func() -> void: _open_settings("lobby")))
-	bottom.add_child(_p2_toggle())
+	_lobby_p2 = _p2_toggle()
+	bottom.add_child(_lobby_p2)
 	var gap2 := Control.new()
 	gap2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bottom.add_child(gap2)
@@ -628,23 +653,8 @@ func _refresh_lobby() -> void:
 		_size_btns[i].disabled = not host or (greys != game.greys_per_team and game.lobby.size() > 2 * (1 + greys))
 		_size_btns[i].tooltip_text = "" if host else "The host picks the team size."
 
-	var my_team := -1
-	for e: Dictionary in game.lobby:
-		if e["id"] == me:
-			my_team = e["team"]
 	for team in 2:
-		var n: int = game.team_count(team)
-		_team_heads[team].text = "%d / %d" % [n, per_team]
-		var b := _team_btns[team]
-		if my_team == team:
-			b.text = "You're on this team"
-			b.disabled = true
-		elif n >= per_team:
-			b.text = "Team full"
-			b.disabled = true
-		else:
-			b.text = "Join %s" % Cfg.TEAM_NAMES[team]
-			b.disabled = false
+		_team_heads[team].text = "%d / %d" % [game.team_count(team), per_team]
 
 	_count.text = "%d / %d players" % [game.lobby.size(), game.room_size()]
 	_count.add_theme_color_override("font_color", UI.GOLD if full else Color.WHITE)
@@ -652,7 +662,7 @@ func _refresh_lobby() -> void:
 		_room_note.text = "The room is full. Anyone else who tries to join will be told so%s." % (
 				", unless you pick a bigger team size" if host and game.greys_per_team < 3 else "")
 	else:
-		_room_note.text = "Bots fill every open seat."
+		_room_note.text = "Pick an open seat to play it: the Overlord flies the saucer, Greys run the ground. Bots fill every open seat."
 	_start_btn.visible = host
 	var host_name := ""
 	for e: Dictionary in game.lobby:
@@ -668,20 +678,54 @@ func _refresh_lobby() -> void:
 	if sig == _lobby_sig:
 		return
 	_lobby_sig = sig
+	# Rebuilding frees the seat button that had focus (say, the one just
+	# pressed), so put focus back on an open seat on the same team.
+	var had := -1
+	var owner := get_viewport().gui_get_focus_owner()
+	for team in 2:
+		if owner != null and _team_lists[team].is_ancestor_of(owner):
+			had = team
+	# Each team's seats: its Overlord, then its Greys.
 	for team in 2:
 		var list := _team_lists[team]
 		for child in list.get_children():
 			list.remove_child(child)
 			child.queue_free()
-		list.custom_minimum_size.y = per_team * 34 - 6
-		var shown := 0
-		for e: Dictionary in game.lobby:
-			if e["team"] != team:
-				continue
-			list.add_child(_player_row(e, e["id"] == me, e["id"] == game.LOCAL, team))
-			shown += 1
-		for k in range(shown, per_team):
-			list.add_child(_open_row())
+		list.custom_minimum_size.y = per_team * SEAT_H + (per_team - 1) * 6
+		for r: int in [game.OVERLORD, game.GREY]:
+			var shown := 0
+			for e: Dictionary in game.lobby:
+				if e["team"] == team and e["role"] == r:
+					list.add_child(_player_row(e, e["id"] == me, e["id"] == game.LOCAL, team))
+					shown += 1
+			for k in range(shown, game.seats_for(r)):
+				list.add_child(_open_seat(team, r))
+	_link_seats(host)
+	if had >= 0:
+		for team: int in [had, 1 - had]:
+			var c := _first_usable(_team_lists[team])
+			if c != null:
+				c.grab_focus.call_deferred()
+				return
+		_focus_page.call_deferred()
+
+
+## Open seats can sit above a player's row, which takes no focus, and then
+## Godot's guess at what's below them skips the Start button. Chain each
+## team's seat buttons, and from the last go down to what's under its panel.
+func _link_seats(host: bool) -> void:
+	var under: Array[Control] = [_lobby_name, _start_btn if host else _lobby_name]
+	for team in 2:
+		var seats: Array[Button] = []
+		for c in _team_lists[team].get_children():
+			if c is Button:
+				seats.append(c)
+		for i in seats.size():
+			var b := seats[i]
+			b.focus_neighbor_bottom = b.get_path_to(seats[i + 1] if i + 1 < seats.size() else under[team])
+			if i > 0:
+				b.focus_neighbor_top = b.get_path_to(seats[i - 1])
+	_lobby_p2.focus_neighbor_right = _lobby_p2.get_path_to(_start_btn) if host else NodePath()
 
 
 ## A button that lets (or stops) a second player at this machine joining.
@@ -717,9 +761,13 @@ func _player_row(e: Dictionary, mine: bool, is_host: bool, team: int) -> Control
 		sb.border_color = UI.GOLD
 		sb.set_border_width_all(2)
 	r.add_theme_stylebox_override("panel", sb)
-	r.custom_minimum_size = Vector2(0, 28)
+	r.custom_minimum_size = Vector2(0, SEAT_H)
 	var h := UI.row(8)
 	r.add_child(h)
+	h.add_child(_role_icon(e["role"], team))
+	var tag := UI.label(game.ROLE_NAMES[e["role"]].to_upper(), 13, Color(Cfg.TEAM_COLORS[team]).lightened(0.45))
+	tag.custom_minimum_size.x = 74
+	h.add_child(tag)
 	var n := UI.label(e["name"], 18, UI.GOLD if mine else Color.WHITE)
 	n.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	n.clip_text = true
@@ -731,20 +779,59 @@ func _player_row(e: Dictionary, mine: bool, is_host: bool, team: int) -> Control
 	return r
 
 
-func _open_row() -> Control:
-	var r := PanelContainer.new()
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(1, 1, 1, 0.03)
-	sb.border_color = Color(1, 1, 1, 0.1)
-	sb.set_border_width_all(1)
-	sb.set_corner_radius_all(8)
-	sb.content_margin_left = 12
-	sb.content_margin_top = 3
-	sb.content_margin_bottom = 3
-	r.add_theme_stylebox_override("panel", sb)
-	r.custom_minimum_size = Vector2(0, 28)
-	r.add_child(UI.label("Open seat · a bot plays", 15, Color(1, 1, 1, 0.35)))
-	return r
+## An open seat: a bot plays it unless someone takes it with this button.
+func _open_seat(team: int, r: int) -> Button:
+	var b := _role_button(r, team)
+	b.text = "%s · open, a bot plays" % game.ROLE_NAMES[r]
+	b.tooltip_text = "Play %s for %s" % ["the Overlord" if r == game.OVERLORD else "a Grey", Cfg.TEAM_NAMES[team]]
+	b.custom_minimum_size = Vector2(0, SEAT_H)
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	b.add_theme_font_size_override("font_size", 15)
+	b.add_theme_color_override("font_color", Color(1, 1, 1, 0.55))
+	for state in ["normal", "disabled"]:
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = Color(1, 1, 1, 0.03)
+		sb.border_color = Color(1, 1, 1, 0.1)
+		sb.set_border_width_all(1)
+		sb.set_corner_radius_all(8)
+		sb.content_margin_left = 12
+		sb.content_margin_right = 12
+		b.add_theme_stylebox_override(state, sb)
+	var take := UI.label("Take seat ›", 14, Color(Cfg.TEAM_COLORS[team]).lightened(0.45))
+	take.set_anchors_and_offsets_preset(Control.PRESET_RIGHT_WIDE)
+	take.offset_left = -110
+	take.offset_right = -12
+	take.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	take.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	take.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(take)
+	b.pressed.connect(func() -> void:
+		var err: String = game.pick_seat(team, r)
+		if err != "":
+			game._say(err))
+	return b
+
+
+## A button showing a role's sprite and name.
+func _role_button(r: int, team: int) -> Button:
+	var b := UI.button(game.ROLE_NAMES[r])
+	b.icon = UI.Art.tex(ROLE_SPRITES[r], team)
+	b.expand_icon = true
+	b.add_theme_constant_override("icon_max_width", 40 if r == 0 else 22)
+	return b
+
+
+func _role_icon(r: int, team: int) -> TextureRect:
+	var t := TextureRect.new()
+	t.texture = UI.Art.tex(ROLE_SPRITES[r], team)
+	t.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	t.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	t.custom_minimum_size = Vector2(40, 28)
+	return t
+
+
+func _swap_key() -> String:
+	return OS.get_keycode_string(Settings.keys("kb1", "swap")[0])
 
 
 func _build_pause() -> void:

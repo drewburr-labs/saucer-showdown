@@ -413,6 +413,8 @@ func _lobby_tests() -> void:
 	_check(await _until(func() -> bool: return lb.in_lobby and la.lobby.size() == 3, 6.0), "Bo should get in, and Ann should see him")
 	_check(_teams(lh) == [0, 1, 0], "teams should alternate as people join (%s)" % [_teams(lh)])
 	_check(_teams(la) == _teams(lh) and _teams(lb) == _teams(lh), "everyone sees the same teams")
+	_check(_roles(lh) == [Main.OVERLORD, Main.OVERLORD, Main.GREY], "each team's first player gets its Overlord, the next a Grey (%s)" % [_roles(lh)])
+	_check(_roles(la) == _roles(lh) and _roles(lb) == _roles(lh), "everyone sees the same roles")
 	_report()
 
 	_current = "lobby: players pick teams, a full team says no"
@@ -424,6 +426,22 @@ func _lobby_tests() -> void:
 	_check(_teams(lh) == [0, 1, 1], "the host can't overfill a team either (%s)" % [_teams(lh)])
 	lb.set_player_name("Bobo", false)
 	_check(await _until(func() -> bool: return la._name_of(lb.net.id()) == "Bobo", 3.0), "a rename should reach everyone")
+	_report()
+
+	_current = "lobby: players pick their role"
+	_check(_seats(lh) == [[0, 0], [1, 0], [1, 1]], "Bo kept his Grey role when he switched teams (%s)" % [_seats(lh)])
+	_check(lb.pick_seat(0, Main.OVERLORD).contains("taken"), "a taken Overlord seat says no")
+	la.pick_seat(1, Main.GREY)
+	await _frames(20)
+	_check(_seats(lh) == [[0, 0], [1, 0], [1, 1]], "a 2v2 has one Grey seat a team, so Ann can't take Bo's (%s)" % [_seats(lh)])
+	lh.pick_seat(0, Main.GREY)
+	_check(await _until(func() -> bool: return _seats(la) == [[0, 1], [1, 0], [1, 1]], 3.0), "the host moves to Grey and everyone sees it (%s)" % [_seats(la)])
+	lb.pick_seat(0, Main.OVERLORD)
+	_check(await _until(func() -> bool: return _seats(la) == [[0, 1], [1, 0], [0, 0]], 3.0), "Bo crosses over to fly Zeta's saucer (%s)" % [_seats(la)])
+	lb.pick_team(1)
+	_check(await _until(func() -> bool: return _seats(la) == [[0, 1], [1, 0], [1, 1]], 3.0), "a team switch takes the role that's free (%s)" % [_seats(la)])
+	lh.pick_seat(0, Main.OVERLORD)
+	_check(await _until(func() -> bool: return _seats(la) == [[0, 0], [1, 0], [1, 1]], 3.0), "and the host takes the saucer back (%s)" % [_seats(la)])
 	_report()
 
 	_current = "lobby: the room fills up and says so"
@@ -442,6 +460,13 @@ func _lobby_tests() -> void:
 	_check(la.set_team_size(2) == "" and la.greys_per_team == 1, "only the host can change it")
 	_check(lh.set_team_size(2) == "", "4 players fit a 3v3")
 	_check(await _until(func() -> bool: return la.greys_per_team == 2 and lc.greys_per_team == 2, 3.0), "everyone sees 3v3")
+	lc.pick_seat(1, Main.GREY)
+	_check(await _until(func() -> bool: return _role_count(lh, 1, Main.GREY) == 2, 3.0), "3v3 has two Grey seats a team")
+	_check(lh.set_team_size(1) == "", "4 players fit back in a 2v2")
+	_check(_role_count(lh, 1, Main.GREY) == 1 and _role_count(lh, 0, Main.GREY) == 1 and _role_count(lh, 0, Main.OVERLORD) == 1,
+			"shrinking moves the newest extra Grey to a free seat (%s)" % [_seats(lh)])
+	_check(await _until(func() -> bool: return _seats(lc) == _seats(lh), 3.0), "and everyone sees where they went")
+	_check(lh.set_team_size(2) == "", "and back to 3v3")
 	ld.join(at)
 	_check(await _until(func() -> bool: return ld.in_lobby and lh.lobby.size() == 5, 6.0), "now a fifth fits")
 	_check(lh.set_team_size(1).contains("won't fit"), "and the host can't shrink below five players")
@@ -456,9 +481,10 @@ func _lobby_tests() -> void:
 	var teams_ok := true
 	for e: Dictionary in lh.lobby:
 		var key := "%d:kb1" % e["id"]
-		if not lh.humans.has(key) or lh.humans[key]["team"] != e["team"]:
+		if not lh.humans.has(key) or lh.humans[key]["team"] != e["team"] \
+				or (lh.humans[key]["idx"] == 0) != (e["role"] == Main.OVERLORD):
 			teams_ok = false
-	_check(teams_ok, "everyone plays for the team they picked")
+	_check(teams_ok, "everyone plays the team and role they picked")
 	await _settle()
 	_check(la._menu.page() == "", "the lobby gets out of the way")
 	var before: Array = _teams(lh)
@@ -490,6 +516,29 @@ func _lobby_tests() -> void:
 	for g in [lh, la, lb, lc, ld]:
 		g.queue_free()
 	await process_frame
+
+
+func _roles(g: Node) -> Array:
+	var out := []
+	for e: Dictionary in g.lobby:
+		out.append(e["role"])
+	return out
+
+
+## Everyone's [team, role], in join order.
+func _seats(g: Node) -> Array:
+	var out := []
+	for e: Dictionary in g.lobby:
+		out.append([e["team"], e["role"]])
+	return out
+
+
+func _role_count(g: Node, team: int, r: int) -> int:
+	var n := 0
+	for e: Dictionary in g.lobby:
+		if e["team"] == team and e["role"] == r:
+			n += 1
+	return n
 
 
 func _teams(g: Node) -> Array:

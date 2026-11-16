@@ -68,6 +68,12 @@ func _run() -> void:
 	_check(m.page() == "local", "A on Play local opens it")
 	_check(_focus_text() == "Start match", "focus starts on Start match")
 	_reachable("local")
+	_check(m._role_btns[0].button_pressed and not m._role_btns[1].button_pressed, "the Overlord is picked to start with")
+	m._role_btns[1].grab_focus()
+	await _pad(JOY_BUTTON_A)
+	_check(Settings.value("role") == g.GREY and m._role_btns[1].button_pressed and not m._role_btns[0].button_pressed,
+			"A on Grey picks it, and only it")
+	_check(m._local_blurb.text.contains("a Grey"), "the page says you'll play a Grey")
 	await _pad(JOY_BUTTON_B)
 	_check(m.page() == "home" and _focus_text() == "Play online", "B goes home")
 
@@ -136,6 +142,7 @@ func _run() -> void:
 	print("in-game menu")
 	g.start_local(1)
 	await _frames(3)
+	_check(g.humans["1:kb1"]["idx"] == 1, "the match puts you on a Grey, as picked")
 	await _pad(JOY_BUTTON_START)
 	_check(m.page() == "pause" and _focus_text() == "Resume", "Start opens it on Resume")
 	_reachable("pause")
@@ -155,7 +162,20 @@ func _run() -> void:
 	g.host_lan(_free_port())
 	await _frames(3)
 	_check(m.page() == "lobby", "hosting opens the lobby")
+	_check(g.my_entry().get("role") == g.OVERLORD, "the host starts as Zeta's Overlord")
 	_reachable("lobby")
+	var seat: Button = _first_seat(1)
+	_check(seat != null and seat.text.begins_with("Overlord"), "Kepler's open Overlord seat is a button")
+	seat.grab_focus()
+	await _pad(JOY_BUTTON_A)
+	await _frames(2)
+	_check(g.my_entry().get("team") == 1 and g.my_entry().get("role") == g.OVERLORD, "A on it takes it")
+	var owner := m.get_viewport().gui_get_focus_owner()
+	_check(owner != null and owner.is_visible_in_tree() and m._team_lists[1].is_ancestor_of(owner), "focus lands on Kepler's open Grey seat")
+	await _pad(JOY_BUTTON_A)
+	await _frames(2)
+	_check(g.my_entry().get("team") == 1 and g.my_entry().get("role") == g.GREY, "and A again takes that")
+	_reachable("lobby", "after moving")
 	m._lobby_name.grab_focus()
 	await _pad(JOY_BUTTON_A)
 	await _pad(JOY_BUTTON_A) # Q
@@ -171,6 +191,14 @@ func _run() -> void:
 	print("ALL TESTS PASSED" if _failed == 0 else "%d FAILED" % _failed)
 	_watchdog.stop()
 	quit(1 if _failed > 0 else 0)
+
+
+## The first open seat button in a lobby team's list.
+func _first_seat(team: int) -> Button:
+	for c in m._team_lists[team].get_children():
+		if c is Button:
+			return c
+	return null
 
 
 ## Every enabled, focusable control on the page can be reached from the

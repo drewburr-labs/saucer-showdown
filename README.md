@@ -19,7 +19,7 @@ Or open the folder in the Godot editor and press F5.
 The game opens on the home screen, with bots playing behind it:
 
 - **Play online** hosts a room or joins one by its code (see [Play online](#play-online)).
-- **Play local** picks a team size (2v2, 3v3 or 4v4) and starts a match on this machine.
+- **Play local** picks a team size (2v2, 3v3 or 4v4) and whether you play the Overlord or a Grey (the choice is saved), and starts a match on this machine.
 - **2nd player** (on the local setup screen and in the online lobby) lets more players at this machine join. It's off by default, so a stray Enter or gamepad press can't add a player: while it's off, every keyboard and gamepad controls Player 1. The choice is saved.
 - **Settings** has sound (master, music and effects volume, mute), display (windowed or fullscreen, resolution, frame rate limit, VSync, a frame rate counter) and controls (rebind either keyboard player's keys). Settings are saved in `user://settings.cfg`.
 
@@ -60,9 +60,9 @@ Every menu works with a gamepad alone: the d-pad or left stick moves between con
 
 Pick **Play online** and type your name. One player picks **Host a game** and gets a five-letter room code; friends type it in and press **Join**. Games go through the Saucer Showdown relay server (`saucer.drewburr.com`), so nobody has to forward ports.
 
-Everyone lands in the **lobby**, which shows the room code and who is on which team. Newcomers go on the smaller team; anyone can switch to a team with an open seat, and rename themselves. The host picks 2v2, 3v3 or 4v4 and starts the match. A room holds as many players as the team size has seats (4, 6 or 8); anyone who tries to join a full room is told so, and the lobby says when it's full. The host can't pick a size too small for the players already in.
+Everyone lands in the **lobby**, which shows the room code and each team's seats: its Overlord, then its Greys. Newcomers go on the smaller team, flying its saucer if nobody is; anyone can take any open seat (on either team), and rename themselves. A seat nobody takes is played by a bot. The host picks 2v2, 3v3 or 4v4 and starts the match; shrinking the team size moves the newest extra Greys to a free seat. A room holds as many players as the team size has seats (4, 6 or 8); anyone who tries to join a full room is told so, and the lobby says when it's full. The host can't pick a size too small for the players already in.
 
-In the match, each machine's first keyboard plays the seat its player picked; with **2nd player** turned on in the lobby, anyone else at that machine joins with Enter or A, just like couch play. Bots fill every empty seat, and take over when someone leaves. Someone who joins while a match is on goes straight into a free seat. When the match is decided, everyone goes back to the lobby.
+In the match, each machine's first keyboard plays the seat its player picked (Switch unit still swaps mid-match); with **2nd player** turned on in the lobby, anyone else at that machine joins with Enter or A, just like couch play. Bots fill every empty seat, and take over when someone leaves. Someone who joins while a match is on goes straight into a free seat. When the match is decided, everyone goes back to the lobby.
 
 - Everyone needs the same build; a mismatched one is turned away with the two versions named.
 - Only the host can pause (opening the menu with Esc or Start pauses everyone), end the match, or change the team size. Anyone can move the win banner on.

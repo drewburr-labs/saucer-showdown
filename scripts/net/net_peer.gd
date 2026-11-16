@@ -8,14 +8,14 @@ extends RefCounted
 ##
 ## Protocol (first element is the Msg):
 ##   client -> host  HELLO   protocol, version, sim fingerprint, player name
-##                   TEAM    team                   (lobby: wants to play for this team)
+##                   TEAM    team, role             (lobby: wants this seat; role is Main.OVERLORD or GREY)
 ##                   NAME    player name            (lobby: renamed)
 ##                   INPUT   epoch, tick, local input packet (LocalInput.packet())
 ##                   NEXT    epoch                  (wants the next map after a win)
 ##                   SUM     epoch, tick, checksum  (every Main.SUM_EVERY ticks)
 ##                   PING    msec                   (the host answers PONG with the same msec)
 ##   host -> client  REJECT  reason
-##                   LOBBY   greys, in match, [[peer id, name, team], ...]   (who's in the room)
+##                   LOBBY   greys, in match, [[peer id, name, team, role], ...]   (who's in the room)
 ##                   START   epoch, seed, greys, wins0, wins1, match winner, snapshot, paused
 ##                   FRAME   epoch, tick, InputFrame   (confirmed: everyone's real input)
 ##                   SEATS   [[unit id, label, peer id, device], ...]
@@ -30,7 +30,7 @@ const Sim = preload("res://scripts/sim/sim.gd")
 const InputFrame = preload("res://scripts/sim/input_frame.gd")
 
 const PORT := 24680
-const PROTOCOL := 4
+const PROTOCOL := 5
 const MAX_CLIENTS := 7
 const HOST_ID := 1
 

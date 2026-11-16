@@ -30,10 +30,11 @@ func _initialize() -> void:
 			m.host_lan(24699)
 			m.room_code = "KX4PZ"
 			m.greys_per_team = 2
-			for e in [[11, "Sam", 1], [12, "Priya", 0], [13, "Jo", 1], [14, "Marcus", 1]]:
-				m.lobby.append({"id": e[0], "name": e[1], "team": e[2]})],
+			for e in [[11, "Sam", 1, 0], [12, "Priya", 0, 1], [13, "Jo", 1, 1]]:
+				m.lobby.append({"id": e[0], "name": e[1], "team": e[2], "role": e[3]})],
 		["lobby_full", func() -> void:
-			m.lobby.append({"id": 15, "name": "Lee", "team": 0})],
+			for e in [[14, "Marcus", 1, 1], [15, "Lee", 0, 1]]:
+				m.lobby.append({"id": e[0], "name": e[1], "team": e[2], "role": e[3]})],
 		["match", func() -> void:
 			m.lobby.resize(1)
 			m.start_match()
