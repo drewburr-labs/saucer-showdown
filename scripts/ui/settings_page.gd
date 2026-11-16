@@ -62,6 +62,14 @@ func open() -> void:
 	_refresh_keys()
 
 
+## Show the next (1) or previous (-1) tab, and focus its tab bar.
+func cycle_tab(dir: int) -> void:
+	if _rebinding != "":
+		return
+	_tabs.current_tab = posmod(_tabs.current_tab + dir, _tabs.get_tab_count())
+	_tabs.get_tab_bar().grab_focus()
+
+
 ## What to focus when the page opens.
 func first_focus() -> Control:
 	return _tabs.get_tab_bar()

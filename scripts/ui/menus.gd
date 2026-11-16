@@ -4,11 +4,20 @@ extends CanvasLayer
 ## doing and this follows along: during a match the menus stay hidden until
 ## Esc or Start, while in a room they show the lobby, and otherwise the home screen.
 ## Bots play a match behind them.
+##
+## Everything works from a gamepad too: the d-pad or stick moves between
+## controls, A presses, B goes back, LB / RB switch settings tabs, and A on a
+## text field opens an on-screen keyboard.
 
 const Cfg = preload("res://scripts/sim/config.gd")
 const Settings = preload("res://scripts/settings.gd")
 const UI = preload("res://scripts/ui/ui_kit.gd")
 const SettingsPage = preload("res://scripts/ui/settings_page.gd")
+const PadKeyboard = preload("res://scripts/ui/pad_keyboard.gd")
+
+## Actions that move or use focus; if focus has gone missing, the first of
+## these puts it back on the page instead.
+const NAV_ACTIONS := ["ui_up", "ui_down", "ui_left", "ui_right", "ui_accept", "ui_focus_next", "ui_focus_prev"]
 
 var game # Main
 
@@ -23,6 +32,7 @@ var _toast_text: Label
 var _fps: Label
 
 var _version: Label
+var _update_btn: Button
 var _local_btns: Array[Button] = []
 var _local_greys := 1
 var _local_blurb: Label
@@ -49,9 +59,11 @@ var _lobby_sig := ""
 var _pause_note: Label
 var _pause_btns := {} # name -> Button
 var _settings: SettingsPage
+var _keyboard: PadKeyboard
 
 
 func _ready() -> void:
+	_map_pad_buttons()
 	layer = 10
 	_root = Control.new()
 	_root.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -93,6 +105,11 @@ func _ready() -> void:
 	_toast.visible = false
 	_root.add_child(_toast)
 
+	# Not under _root, so focus can't wander between it and the page behind.
+	_keyboard = PadKeyboard.new()
+	_keyboard.theme = _root.theme
+	add_child(_keyboard)
+
 	_fps = UI.label("", 14, Color(1, 1, 1, 0.75))
 	_fps.position = Vector2(Cfg.W - 90, 4)
 	_fps.size = Vector2(84, 20)
@@ -101,6 +118,18 @@ func _ready() -> void:
 	_fps.add_theme_color_override("font_outline_color", UI.INK)
 	add_child(_fps)
 	show_page("home")
+
+
+## Godot's ui_accept and ui_cancel only have keys (its d-pad and stick moves
+## do have the gamepad), so a pad could move between buttons but not press
+## them. Give every gamepad's A and B to them.
+static func _map_pad_buttons() -> void:
+	for pair: Array in [["ui_accept", JOY_BUTTON_A], ["ui_cancel", JOY_BUTTON_B]]:
+		var e := InputEventJoypadButton.new()
+		e.device = -1 # all devices
+		e.button_index = pair[1]
+		if not InputMap.action_has_event(pair[0], e):
+			InputMap.action_add_event(pair[0], e)
 
 
 ## True while a menu covers the game (and takes the keyboard).
@@ -119,6 +148,8 @@ func show_page(name: String) -> void:
 		_pages[k].visible = k == name
 	_page = name
 	_root.visible = name != ""
+	if _keyboard.is_open():
+		_keyboard.cancel()
 	match name:
 		"online":
 			_online_name.text = Settings.value("name")
@@ -129,8 +160,42 @@ func show_page(name: String) -> void:
 		"settings":
 			_settings.open()
 	_refresh()
-	if _first.has(name) and is_inside_tree():
-		_first[name].grab_focus.call_deferred()
+	if is_inside_tree():
+		_focus_page.call_deferred()
+
+
+## Focus the page's first control, or the first usable one when that's hidden
+## or disabled (a client's lobby has no Start button).
+func _focus_page() -> void:
+	var c := _focus_target()
+	if c != null:
+		c.grab_focus()
+
+
+func _focus_target() -> Control:
+	if _keyboard.is_open():
+		return _keyboard.first_focus()
+	if not _pages.has(_page):
+		return null
+	var f: Control = _first.get(_page)
+	if f != null and _usable(f):
+		return f
+	return _first_usable(_pages[_page])
+
+
+static func _usable(c: Control) -> bool:
+	return c.is_visible_in_tree() and c.focus_mode == Control.FOCUS_ALL \
+			and not (c is BaseButton and c.disabled)
+
+
+static func _first_usable(n: Node) -> Control:
+	for child in n.get_children():
+		if child is Control and _usable(child):
+			return child
+		var deeper := _first_usable(child)
+		if deeper != null:
+			return deeper
+	return null
 
 
 # --- Following the game --------------------------------------------------
@@ -161,10 +226,45 @@ func _follow() -> void:
 		show_page("online" if game.role != game.Role.OFFLINE else _after_room)
 
 
+## Gamepad extras that must come before the controls see the event.
+func _input(event: InputEvent) -> void:
+	if not is_open() and not _keyboard.is_open():
+		return
+	if _keyboard.is_open():
+		if _keyboard.handle(event):
+			get_viewport().set_input_as_handled()
+			return
+	elif _pad_pressed(event, JOY_BUTTON_A):
+		var field := get_viewport().gui_get_focus_owner() as LineEdit
+		if field != null and field.editable:
+			_keyboard.open(field, "ROOM CODE" if field == _code else "YOUR NAME")
+			get_viewport().set_input_as_handled()
+			return
+	elif _page == "settings" and (_pad_pressed(event, JOY_BUTTON_LEFT_SHOULDER) or _pad_pressed(event, JOY_BUTTON_RIGHT_SHOULDER)):
+		_settings.cycle_tab(1 if _pad_pressed(event, JOY_BUTTON_RIGHT_SHOULDER) else -1)
+		get_viewport().set_input_as_handled()
+		return
+	# Focus went missing (the focused button was hidden, or a click on empty
+	# space): the first press puts it back rather than doing nothing.
+	var owner := get_viewport().gui_get_focus_owner()
+	if owner != null and owner.is_visible_in_tree():
+		return
+	for a: String in NAV_ACTIONS:
+		if event.is_action_pressed(a):
+			_focus_page()
+			get_viewport().set_input_as_handled()
+			return
+
+
+static func _pad_pressed(event: InputEvent, button: JoyButton) -> bool:
+	var pad := event as InputEventJoypadButton
+	return pad != null and pad.pressed and pad.button_index == button
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if key != null and key.pressed and not key.echo and key.physical_keycode == KEY_ESCAPE:
-		_escape()
+		_escape() # (the on-screen keyboard took Esc already, in _input)
 		get_viewport().set_input_as_handled()
 	elif _is_start(event) and _page in ["", "pause"]:
 		# Gamepad Start opens and closes the in-game menu, like Esc.
@@ -177,8 +277,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 static func _is_start(event: InputEvent) -> bool:
-	var pad := event as InputEventJoypadButton
-	return pad != null and pad.pressed and pad.button_index == JOY_BUTTON_START
+	return _pad_pressed(event, JOY_BUTTON_START)
 
 
 func _escape() -> void:
@@ -207,6 +306,7 @@ func _refresh() -> void:
 			var up = game.updater
 			var status: String = up.status_text() if up != null else ""
 			_version.text = (up.version if up != null else "") + ("   ·   " + status if status != "" else "")
+			_refresh_update(up)
 		"local":
 			var who := "Player 2 joins with %s and gamepads with %s, at any time." % [_p2_key(), _pad_join()] \
 					if Settings.value("extra_players") else "Any keyboard or gamepad plays as you."
@@ -270,6 +370,13 @@ func _build_home() -> void:
 	buttons.add_child(UI.big_button("Play local", func() -> void: show_page("local")))
 	buttons.add_child(UI.big_button("Settings", func() -> void: _open_settings("home")))
 	buttons.add_child(UI.big_button("Quit", func() -> void: get_tree().quit()))
+	# What F5 does, for a gamepad: check, install, or retry a failed update.
+	_update_btn = UI.button("", func() -> void:
+		if game.updater != null:
+			game.updater.install())
+	_update_btn.custom_minimum_size = Vector2(320, 40)
+	_update_btn.visible = false
+	buttons.add_child(_update_btn)
 	# No panel behind these, so give them a solid fill over the busy arena.
 	for b: Button in buttons.get_children():
 		for state in ["normal", "hover", "disabled"]:
@@ -283,6 +390,28 @@ func _build_home() -> void:
 	_version = UI.label("", 14, Color(1, 1, 1, 0.5))
 	_version.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(_version)
+
+
+func _refresh_update(up) -> void:
+	var on: bool = up != null and up.enabled()
+	_update_btn.visible = on
+	if not on:
+		return
+	var S = up.State
+	match up.state:
+		S.CHECKING:
+			_update_btn.text = "Checking for updates…"
+		S.AVAILABLE:
+			_update_btn.text = "Install update %s" % up.latest
+		S.DOWNLOADING:
+			_update_btn.text = "Downloading… %d%%" % roundi(up.progress() * 100.0)
+		S.INSTALLING:
+			_update_btn.text = "Installing…"
+		S.FAILED:
+			_update_btn.text = "Retry the update"
+		_:
+			_update_btn.text = "Check for updates"
+	_update_btn.disabled = up.state in [S.CHECKING, S.DOWNLOADING, S.INSTALLING]
 
 
 func _build_local() -> void:
@@ -633,6 +762,9 @@ func _build_pause() -> void:
 	add.call("restart", "Restart match", func() -> void:
 		game.start_local(game.greys_per_team)
 		show_page(""))
+	add.call("help", "", func() -> void:
+		game.show_help = not game.show_help
+		_resume())
 	add.call("settings", "Settings", func() -> void: _open_settings("pause"))
 	add.call("lobby", "End match · back to lobby", func() -> void: game.end_match())
 	add.call("setup", "Back to setup", func() -> void: game.end_match())
@@ -649,6 +781,7 @@ func _build_pause() -> void:
 
 
 func _refresh_pause() -> void:
+	_pause_btns["help"].text = "Hide controls" if game.show_help else "Show controls"
 	var offline: bool = game.role == game.Role.OFFLINE
 	var host: bool = game.role == game.Role.HOST
 	_pause_btns["restart"].visible = offline

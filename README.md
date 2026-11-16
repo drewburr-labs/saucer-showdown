@@ -52,7 +52,9 @@ A match is best of 3 maps.
 - **Saucer damage:** a saucer takes 3 hits to bring down. It smokes after one and sparks after two; the bar beside its lives shows what's left. A fresh saucer is back to full.
 - **Saucer wrecks:** a downed saucer stays where it falls as a platform until its Overlord respawns.
 
-Other keys: Esc (or Start on a gamepad) opens the in-game menu (resume, restart, settings, back to the lobby or home), F1 controls, F3 hand Player 1's seat to a bot and watch (local games), F5 check for an update (and install it when one is offered). Keyboard keys and gamepad buttons can be changed in Settings (every gamepad shares one set; the left stick always moves, and Start always opens the menu).
+Other keys: Esc (or Start on a gamepad) opens the in-game menu (resume, restart, show controls, settings, back to the lobby or home), F1 controls, F3 hand Player 1's seat to a bot and watch (local games), F5 check for an update (and install it when one is offered; the home screen has a button for it too). Keyboard keys and gamepad buttons can be changed in Settings (every gamepad shares one set; the left stick always moves, and Start always opens the menu).
+
+Every menu works with a gamepad alone: the d-pad or left stick moves between controls, A presses, B goes back, and LB / RB switch tabs in Settings. A on a text field (your name, a room code) opens an on-screen keyboard: X deletes, Y switches case, Start finishes and B cancels.
 
 ## Play online
 
@@ -112,6 +114,7 @@ tests/
   test_updater.gd      headless tests for version ordering and asset choice
   test_net.gd          host and clients over loopback (and with fake lag), checked tick by tick; the lobby
   test_input.gd        gamepad bindings, read and rebound on the settings page; F1 help naming them
+  test_menus.gd        every menu driven by a gamepad alone, the on-screen keyboard included
   bot_stats.gd         balance probe: how bot-only matches end
 relay/                 the relay server and its Docker image (see relay/README.md)
   relay_server.gd      rooms, codes, forwarding
@@ -209,6 +212,10 @@ godot --headless --path . --script tests/test_net.gd
 
 ```bash
 godot --headless --path . --script tests/test_input.gd
+```
+
+```bash
+godot --headless --path . --script tests/test_menus.gd
 ```
 
 ```bash
