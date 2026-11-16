@@ -179,7 +179,7 @@ Online games go through a small relay so players behind home routers can connect
 - **Run it:** `docker run -p 24680:24680/udp ghcr.io/drewburr-labs/saucer-showdown-relay`. It needs **UDP** port 24680 reachable from the internet (an HTTP proxy or tunnel won't carry it). It's stateless and logs to stdout; an idle relay uses well under 1% of a core and about 35 MB.
 - **Address:** the game connects to `saucer.drewburr.com:24680` (`HOST_NAME` and `PORT` in `scripts/net/relay_protocol.gd`).
 - **Check a deployment:** `godot --headless --path . --script tools/relay_probe.gd -- saucer.drewburr.com` opens a room, joins it and passes a packet each way.
-- **Limits:** 7 clients per room, 400 rooms, 1024 connections; 20 wrong room codes per address per minute.
+- **Limits:** 8 machines per room (the host plus 7 friends; with couch players on some of them, that easily fills a 4v4), 400 rooms, 1024 connections; 20 wrong room codes per address per minute.
 - **Compatibility:** the relay doesn't read game messages, so it only needs redeploying when `VERSION` in `relay_protocol.gd` changes. A game with a different `VERSION` is told to update.
 
 ```bash
