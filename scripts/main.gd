@@ -28,6 +28,7 @@ const NetPeer = preload("res://scripts/net/net_peer.gd")
 const RelayLink = preload("res://scripts/net/relay_link.gd")
 const RP = preload("res://relay/relay_protocol.gd")
 const ArenaView = preload("res://scripts/view/arena_view.gd")
+const Sound = preload("res://scripts/audio/sound.gd")
 const Hud = preload("res://scripts/view/hud.gd")
 const Menus = preload("res://scripts/ui/menus.gd")
 const Settings = preload("res://scripts/settings.gd")
@@ -85,6 +86,7 @@ var _win_ticks := 0
 var _next_sent := false
 var _input = LocalInput.new() # untyped so tests can script it
 var _view: ArenaView
+var _sound: Sound
 var _hud: Hud
 var _menu: Menus
 var _host_port := NetPeer.PORT
@@ -118,6 +120,8 @@ func _ready() -> void:
 	randomize()
 	_view = ArenaView.new()
 	add_child(_view)
+	_sound = Sound.new()
+	add_child(_sound)
 	_hud = Hud.new()
 	_hud.game = self
 	add_child(_hud)
@@ -345,6 +349,9 @@ func _start_attract() -> void:
 	sim = Sim.new(randi(), 3)
 	_view.sim = sim
 	_view.labels = {}
+	_sound.sim = sim
+	_sound.quiet = true
+	_sound.music("menu")
 	win_confirmed = false
 	waiting_t = 0
 	you = ""
@@ -357,6 +364,7 @@ func _step_attract() -> void:
 	sim.step_frame(InputFrame.all_bots(sim.units.size()))
 	if not sim.events.is_empty():
 		_view.add_events(sim.events)
+		_sound.add_events(sim.events)
 
 
 func _new_match() -> void:
@@ -396,6 +404,11 @@ func _begin(p_seed: int, greys: int, snapshot: PackedByteArray) -> void:
 	waiting_t = 0
 	_drift = 0
 	_view.sim = sim
+	_sound.sim = sim
+	_sound.quiet = false
+	_sound.music("battle")
+	if sim.tick < 30: # not a late join or a resync
+		_sound.go()
 	if role != Role.CLIENT:
 		_sums.clear()
 		for id: int in _peers:
@@ -430,6 +443,7 @@ func _advance_map() -> void:
 
 func _physics_process(_delta: float) -> void:
 	_input.poll()
+	_sound.ducked = in_match and _menu.is_open()
 	notice_t = maxf(0.0, notice_t - Cfg.TICK)
 	if net != null:
 		_net_events()
@@ -657,6 +671,7 @@ func _show_events(t: int, events: Array, replay: bool) -> void:
 			_shown.append([t, ev["type"], ev.get("team", -1), ev["pos"]])
 	if not fresh.is_empty():
 		_view.add_events(fresh)
+		_sound.add_events(fresh)
 	while not _shown.is_empty() and _shown[0][0] < _verified - 10:
 		_shown.pop_front()
 
@@ -669,6 +684,7 @@ func _check_win() -> void:
 		map_wins[sim.winner] += 1
 		if map_wins[sim.winner] >= Cfg.MAPS_TO_WIN:
 			match_winner = sim.winner
+		_sound.win(match_winner >= 0)
 	_win_ticks += 1
 	if match_winner >= 0 and _win_ticks > BACK_TO_LOBBY and role != Role.CLIENT:
 		end_match()

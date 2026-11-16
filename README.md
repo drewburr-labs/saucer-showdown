@@ -2,7 +2,7 @@
 
 A team arcade brawler: two alien fleets fight over one farm, and there are three ways to win a map.
 
-This is the **prototype** (step 1 of the concept doc): one map, bots in every seat a human doesn't take, and all three win conditions working. The art is a first pass of hand-written SVG sprites; there is no sound yet.
+This is the **prototype** (step 1 of the concept doc): one map, bots in every seat a human doesn't take, and all three win conditions working. The art is a first pass of hand-written SVG sprites, and the sound is synthesised by a script.
 
 ![Screenshot](docs/screenshot.png)
 
@@ -21,7 +21,7 @@ The game opens on the home screen, with bots playing behind it:
 - **Play online** hosts a room or joins one by its code (see [Play online](#play-online)).
 - **Play local** picks a team size (2v2, 3v3 or 4v4) and starts a match on this machine.
 - **2nd player** (on the local setup screen and in the online lobby) lets more players at this machine join. It's off by default, so a stray Enter or gamepad press can't add a player: while it's off, every keyboard and gamepad controls Player 1. The choice is saved.
-- **Settings** has sound (master, music and effects volume, mute), display (windowed or fullscreen, resolution, frame rate limit, VSync, a frame rate counter) and controls (rebind either keyboard player's keys). Settings are saved in `user://settings.cfg`. There is no audio yet, so the volume settings are ready for when there is.
+- **Settings** has sound (master, music and effects volume, mute), display (windowed or fullscreen, resolution, frame rate limit, VSync, a frame rate counter) and controls (rebind either keyboard player's keys). Settings are saved in `user://settings.cfg`.
 
 When a match is decided, everyone goes back to the lobby (online) or the local setup screen, after a key press or 10 seconds.
 
@@ -87,6 +87,7 @@ scripts/
   net/net_peer.gd      game message protocol, and the direct ENet transport
   net/relay_link.gd    the same, through the relay server
   update/updater.gd    update check and self-install from GitHub Releases
+  audio/sound.gd       effects, loops, menu clicks and music, from the sim's events and state
   view/
     arena_view.gd      draws the arena from sim state: sprites, animation, particles, glow
     hud.gd             top bar, win banner, controls overlay, online status
@@ -98,10 +99,13 @@ scripts/
 assets/
   sprites/             SVG art, one file per sprite
   fonts/               Lilita One and Fredoka (SIL Open Font License)
+  sounds/              every effect (WAV) and music track (Ogg), made by tools/make_sounds.gd
+default_bus_layout.tres  the Master, Music and Effects buses (a limiter on Master)
 tools/
   screenshot.gd        runs the game and saves screenshots
   menu_shots.gd        saves a screenshot of every menu page
   sprite_sheet.gd      saves every sprite, in both team colours, on one sheet
+  make_sounds.gd       synthesises every sound in assets/sounds
   sim_trace.gd         plays fixed matches and writes the sim's checksums
 tests/
   test_sim.gd          headless tests for every rule and win condition
@@ -169,6 +173,26 @@ godot --path . --script tools/screenshot.gd -- shots 3 12 30
 godot --path . --script tools/menu_shots.gd -- shots
 ```
 
+## Sound
+
+Every sound is synthesised by `tools/make_sounds.gd` from oscillators, noise, filters and echoes; nothing is recorded. Each one is a short recipe in that file, so to change a sound, edit its recipe and make it again (music takes a minute or two; ffmpeg must be on PATH to encode it):
+
+```bash
+godot --headless --path . --script tools/make_sounds.gd -- moo1 moo2
+```
+
+```bash
+godot --headless --path . --import
+```
+
+With no names it makes all of them. A recorded or hand-made file can replace any of them too: keep the name (WAV for effects, Ogg for music).
+
+- `scripts/audio/sound.gd` plays them. Effects come from the sim's events (hits, kills, banked cows, heists, power-ups, claims) and from watching its state each tick (shots, jumps, respawns, pickups, beams, the tractor), panned to where they happen. How loud each one plays is its `GAIN` there.
+- Like the view, it only reads the sim. A rolled-back tick doesn't repeat its events' sounds, and the win fanfare waits for the win to be confirmed.
+- The bots' match behind the menus plays quietly; the menus have their own music, and a match has another.
+- Every button clicks, and moving the focus with keys or a gamepad ticks.
+- The loops (`beam_loop`, `tractor_loop`, and both music tracks) are set to loop in their `.import` files.
+
 ## Tests
 
 ```bash
@@ -225,6 +249,6 @@ To rehearse an update against a local feed, debug exports accept `-- --update-fe
 
 - Bot balance: since saucers take 3 hits, bot-only matches mostly end in Economic wins after roughly 2–3 minutes, still short of the 3–5 minute target.
 - The Windows half of the updater has not been run on Windows yet.
-- No audio yet (the volume settings are wired up for when there is). The art is a first pass, not final.
+- The art and sound are a first pass, not final.
 - Online: all games go through the one relay, so players far from it get a longer ping. There's no matchmaking: you share a room code.
 - Online: a rollback correction moves remote players instantly instead of smoothing them into place, and an effect from a wrong prediction (say, a hit that didn't happen) stays on screen.

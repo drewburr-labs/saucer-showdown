@@ -105,7 +105,6 @@ func _sound_tab() -> Control:
 		Settings.set_value("mute", on)
 		Settings.apply_audio())
 	box.add_child(_mute)
-	box.add_child(UI.label("The game has no sound effects or music yet; these are ready for when it does.", 15, Color(1, 1, 1, 0.45), true))
 	return box
 
 

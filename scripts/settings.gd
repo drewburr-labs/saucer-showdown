@@ -138,7 +138,7 @@ static func apply_audio() -> void:
 	for bus: String in BUSES:
 		var i := AudioServer.get_bus_index(bus)
 		if i < 0:
-			# No sounds exist yet; make the buses so they're ready when they do.
+			# default_bus_layout.tres has them; this covers a project without it.
 			AudioServer.add_bus()
 			i = AudioServer.bus_count - 1
 			AudioServer.set_bus_name(i, bus)
