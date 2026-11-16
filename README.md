@@ -107,7 +107,7 @@ tests/
   test_sim.gd          headless tests for every rule and win condition
   test_updater.gd      headless tests for version ordering and asset choice
   test_net.gd          host and clients over loopback (and with fake lag), checked tick by tick; the lobby
-  test_input.gd        gamepad bindings, read and rebound on the settings page
+  test_input.gd        gamepad bindings, read and rebound on the settings page; F1 help naming them
   bot_stats.gd         balance probe: how bot-only matches end
 relay/                 the relay server and its Docker image (see relay/README.md)
   relay_server.gd      rooms, codes, forwarding

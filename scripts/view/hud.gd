@@ -5,15 +5,15 @@ extends Node2D
 const Cfg = preload("res://scripts/sim/config.gd")
 const Sim = preload("res://scripts/sim/sim.gd")
 const Art = preload("res://scripts/view/art.gd")
+const Settings = preload("res://scripts/settings.gd")
 
 const INK := Color("140f26")
 const PANEL := Color(0.04, 0.03, 0.12, 0.82)
 const BAR_H := 62.0
 
+## The controls overlay below the rows for P1, P2 and Pad, which _help()
+## builds from the current bindings.
 const HELP := [
-	["P1", "WASD move  ·  Space jump  ·  J fire / use  ·  K tractor beam  ·  Q switch unit"],
-	["P2", "Arrows move  ·  Up jump  ·  . fire / use  ·  / tractor beam  ·  Enter join / switch unit"],
-	["Pad", "Stick move  ·  A jump / join  ·  X fire / use  ·  B tractor beam  ·  Y switch unit  ·  Start menu"],
 	["", ""],
 	["", "Overlord (saucer): flies, shoots, beams cows or teammates, claims Probe Stations by touch."],
 	["", "Grey: carries cows. Use next to the tractor to ride it. Down + jump drops through a platform."],
@@ -23,6 +23,13 @@ const HELP := [
 	["", ""],
 	["", "F1 help  ·  F3 spectate bots (local)  ·  F5 update  ·  Esc menu"],
 ]
+
+## Punctuation keys, which help reads better as the symbol than the name.
+const SYMBOLS := {
+	KEY_PERIOD: ".", KEY_COMMA: ",", KEY_SLASH: "/", KEY_BACKSLASH: "\\", KEY_SEMICOLON: ";",
+	KEY_APOSTROPHE: "'", KEY_BRACKETLEFT: "[", KEY_BRACKETRIGHT: "]", KEY_MINUS: "-",
+	KEY_EQUAL: "=", KEY_QUOTELEFT: "`",
+}
 
 var game # Main
 var _font: Font
@@ -268,10 +275,46 @@ func _draw_net() -> void:
 	_text(_font, Vector2(0, r.position.y + 21), game.notice, 15, Color(1, 1, 1, a), HORIZONTAL_ALIGNMENT_CENTER, Cfg.W)
 
 
+## Every row of the controls overlay, naming each action's first binding.
+func _help() -> Array:
+	var kb := "%s move  ·  %s jump  ·  %s fire / use  ·  %s tractor beam  ·  %s %s"
+	return [
+		["P1", kb % [_moves("kb1"), _bound("kb1", "jump"), _bound("kb1", "action"), _bound("kb1", "beam"),
+				_bound("kb1", "swap"), "switch unit"]],
+		["P2", kb % [_moves("kb2"), _bound("kb2", "jump"), _bound("kb2", "action"), _bound("kb2", "beam"),
+				_bound("kb2", "swap"), "join / switch unit"]],
+		["Pad", "Stick move  ·  %s jump / join  ·  %s fire / use  ·  %s tractor beam  ·  %s switch unit  ·  Start menu" % [
+				_bound("pad", "jump"), _bound("pad", "action"), _bound("pad", "beam"), _bound("pad", "swap")]],
+	] + HELP
+
+
+## The first key or button bound to `action` on `device`, as help shows it.
+static func _bound(device: String, action: String) -> String:
+	var code: int = Settings.keys(device, action)[0]
+	if device == "pad":
+		return Settings.pad_button_name(code)
+	return SYMBOLS.get(code, OS.get_keycode_string(code))
+
+
+## A keyboard's four move keys in one word where they read as one: "WASD",
+## "Arrows", or else "I / J / K / L".
+static func _moves(device: String) -> String:
+	var keys := PackedStringArray()
+	for action: String in ["up", "left", "down", "right"]:
+		keys.append(_bound(device, action))
+	if keys == PackedStringArray(["Up", "Left", "Down", "Right"]):
+		return "Arrows"
+	for k in keys:
+		if k.length() != 1:
+			return " / ".join(keys)
+	return "".join(keys)
+
+
 func _draw_help() -> void:
+	var help := _help()
 	var w := 1000.0
 	var row := 23.0
-	var h := row * HELP.size() + 30.0
+	var h := row * help.size() + 30.0
 	var r := Rect2((Cfg.W - w) * 0.5, Cfg.H - h - 26.0, w, h)
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = Color(0.04, 0.03, 0.12, 0.9)
@@ -279,9 +322,9 @@ func _draw_help() -> void:
 	sb.set_border_width_all(2)
 	sb.set_corner_radius_all(14)
 	draw_style_box(sb, r)
-	for i in HELP.size():
+	for i in help.size():
 		var y := r.position.y + 30.0 + row * i
-		var tag: String = HELP[i][0]
+		var tag: String = help[i][0]
 		if tag != "":
 			var tw := 46.0
 			var kr := Rect2(r.position.x + 22.0, y - 16.0, tw, 21.0)
@@ -290,7 +333,7 @@ func _draw_help() -> void:
 			ks.set_corner_radius_all(6)
 			draw_style_box(ks, kr)
 			_text(_title, Vector2(kr.position.x, y), tag, 15, INK if tag == "Win" else Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, tw)
-		_text(_font, Vector2(r.position.x + 84.0, y), HELP[i][1], 15, Color(1, 1, 1, 0.92))
+		_text(_font, Vector2(r.position.x + 84.0, y), help[i][1], 15, Color(1, 1, 1, 0.92))
 
 
 func _draw_update() -> void:

@@ -1,12 +1,14 @@
 extends SceneTree
-## Gamepad bindings: the defaults, a faked gamepad read through them, and
-## rebinding on the settings page with a gamepad. Uses a scratch settings
+## Gamepad bindings: the defaults, a faked gamepad read through them,
+## rebinding on the settings page with a gamepad, and the F1 help naming
+## whatever is bound. Uses a scratch settings
 ## file, so the player's own settings are never touched.
 ##   godot --headless --path . --script tests/test_input.gd
 
 const Settings = preload("res://scripts/settings.gd")
 const LocalInput = preload("res://scripts/input/local_input.gd")
 const SettingsPage = preload("res://scripts/ui/settings_page.gd")
+const Hud = preload("res://scripts/view/hud.gd")
 
 const SCRATCH := "user://test_input_settings.cfg"
 const PAD := 0
@@ -101,6 +103,25 @@ func _run() -> void:
 	print("reset")
 	Settings.reset_keys()
 	_check(Settings.keys("pad", "jump") == [JOY_BUTTON_A], "back to A")
+
+	print("F1 help names the current bindings")
+	var hud := Hud.new()
+	var help := hud._help()
+	_check(help[0][1] == "WASD move  ·  Space jump  ·  J fire / use  ·  K tractor beam  ·  Q switch unit", "P1 defaults")
+	_check(help[1][1] == "Arrows move  ·  Up jump  ·  . fire / use  ·  / tractor beam  ·  Enter join / switch unit", "P2 defaults")
+	_check(help[2][1] == "Stick move  ·  A jump / join  ·  X fire / use  ·  B tractor beam  ·  Y switch unit  ·  Start menu", "Pad defaults")
+	for a: Array in [["up", KEY_I], ["left", KEY_J], ["down", KEY_K], ["right", KEY_L], ["action", KEY_U]]:
+		Settings.set_keys("kb1", a[0], [a[1]])
+	Settings.set_keys("kb2", "up", [KEY_KP_8])
+	Settings.set_keys("kb2", "beam", [KEY_SEMICOLON])
+	Settings.set_keys("pad", "jump", [JOY_BUTTON_LEFT_SHOULDER])
+	Settings.set_keys("pad", "action", [Settings.PAD_LT])
+	help = hud._help()
+	_check(help[0][1].begins_with("IJKL move  ·  Space jump  ·  U fire / use"), "P1 rebound: " + help[0][1])
+	_check(help[1][1].begins_with("Kp 8 / Left / Down / Right move  ·  Up jump  ·  . fire / use  ·  ; tractor beam"), "P2 rebound: " + help[1][1])
+	_check(help[2][1].begins_with("Stick move  ·  LB jump / join  ·  LT fire / use"), "Pad rebound: " + help[2][1])
+	hud.free()
+	Settings.reset_keys()
 
 	page.queue_free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(SCRATCH))
