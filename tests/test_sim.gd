@@ -9,13 +9,22 @@ const Bot = preload("res://scripts/sim/bot.gd")
 const MapData = preload("res://scripts/sim/map_data.gd")
 const InputFrame = preload("res://scripts/sim/input_frame.gd")
 const FMath = preload("res://scripts/sim/fmath.gd")
+const Watchdog = preload("res://tests/watchdog.gd")
+
+## Fails the run, saying where it was, if it takes longer than this; a normal
+## run takes about 20 s (40 s on a busy machine); most of it is
+## the bot soak's 12 full matches.
+const TIME_LIMIT := 60
 
 var _failed := 0
 var _current := ""
 var _sims: Array = []
+var _watchdog: Watchdog
 
 
 func _init() -> void:
+	var started := Time.get_ticks_msec()
+	_watchdog = Watchdog.new(TIME_LIMIT, func() -> String: return _current)
 	_run("nav graph reaches every platform", _test_nav)
 	_run("tractor win", _test_tractor_win)
 	_run("tractor flattens enemy greys", _test_tractor_flattens)
@@ -38,15 +47,18 @@ func _init() -> void:
 	_run("rollback with wrong guesses converges", _test_rollback)
 	for s: Sim in _sims:
 		s.dispose()
-	print("\n%s" % ("ALL TESTS PASSED" if _failed == 0 else "%d TEST(S) FAILED" % _failed))
+	_watchdog.stop()
+	print("\n%s in %.1f s" % ["ALL TESTS PASSED" if _failed == 0 else "%d TEST(S) FAILED" % _failed,
+			(Time.get_ticks_msec() - started) / 1000.0])
 	quit(1 if _failed > 0 else 0)
 
 
 func _run(title: String, fn: Callable) -> void:
 	_current = title
 	var before := _failed
+	var from := Time.get_ticks_msec()
 	fn.call()
-	print("%s  %s" % ["ok  " if _failed == before else "FAIL", title])
+	print("%s  %5.1f s  %s" % ["ok  " if _failed == before else "FAIL", (Time.get_ticks_msec() - from) / 1000.0, title])
 
 
 func _check(cond: bool, what: String) -> void:

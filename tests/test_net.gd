@@ -4,7 +4,7 @@ extends SceneTree
 ## on every tick, through a late join, a new map, a player leaving and a
 ## mismatched build being turned away; and that the lobby handles names,
 ## teams, team sizes, a full room and coming back after a match. Runs in real
-## time, about 25 s.
+## time, about 45 s; each section prints how long it took.
 ##   godot --headless --path . --script tests/test_net.gd
 
 const Main = preload("res://scripts/main.gd")
@@ -14,8 +14,12 @@ const RelayClient = preload("res://relay/relay_client.gd")
 const RP = preload("res://relay/relay_protocol.gd")
 const LocalInput = preload("res://scripts/input/local_input.gd")
 const InputFrame = preload("res://scripts/sim/input_frame.gd")
+const Watchdog = preload("res://tests/watchdog.gd")
 
-const PORT := 24690
+## Fails the run, saying where it was, if it takes longer than this; a normal
+## run takes 44 s, nearly all of it real games running at real speed.
+const TIME_LIMIT := 60
+
 
 
 ## Runs a relay server inside the test, polled every physics frame.
@@ -64,10 +68,38 @@ class TwoDevices extends LocalInput:
 
 var _failed := 0
 var _current := ""
+var _port := 0 # first of 4 free UDP ports; see _free_ports()
+var _started := 0 # msec, when the run began
+var _section_from := 0 # msec, when the current section began
+var _watchdog: Watchdog
 
 
 func _initialize() -> void:
+	_port = _free_ports(4)
+	_started = Time.get_ticks_msec()
+	_section_from = _started
+	_watchdog = Watchdog.new(TIME_LIMIT, func() -> String: return _current)
 	_run.call_deferred()
+
+
+## The first of `count` consecutive UDP ports nothing is using, picked at
+## random, so two runs at once (say, in two worktrees) don't collide.
+static func _free_ports(count: int) -> int:
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	for attempt in 50:
+		var base := rng.randi_range(20000, 40000)
+		var socks: Array[PacketPeerUDP] = []
+		for i in count:
+			var u := PacketPeerUDP.new()
+			if u.bind(base + i) != OK:
+				break
+			socks.append(u)
+		for u in socks:
+			u.close()
+		if socks.size() == count:
+			return base
+	return 24690
 
 
 func _run() -> void:
@@ -119,8 +151,8 @@ func _run() -> void:
 	var host := _game(1, "Hana")
 	var c1 := _game(2, "Cleo")
 	await physics_frame
-	_check(host.host_lan(PORT) == "", "host should start")
-	_check(c1.join("127.0.0.1:%d" % PORT) == "", "client should start connecting")
+	_check(host.host_lan(_port) == "", "host should start")
+	_check(c1.join("127.0.0.1:%d" % _port) == "", "client should start connecting")
 
 	_current = "client joins the lobby, host starts, they play"
 	_check(await _until(func() -> bool: return c1.in_lobby and c1.lobby.size() == 2, 8.0), "client should reach the lobby within 8 s")
@@ -142,7 +174,7 @@ func _run() -> void:
 	_current = "second client joins mid-map"
 	var c2 := _game(3, "Dax")
 	await physics_frame
-	c2.join("127.0.0.1:%d" % PORT)
+	c2.join("127.0.0.1:%d" % _port)
 	_check(await _until(func() -> bool: return c2._started, 8.0), "late joiner should get the match")
 	var joined_at: int = c2.sim.tick
 	_check(joined_at > 200, "and start from the host's snapshot, not tick 0 (%d)" % joined_at)
@@ -194,7 +226,7 @@ func _run() -> void:
 	var c3 := _game(4)
 	c3.fingerprint = 12345
 	await physics_frame
-	c3.join("127.0.0.1:%d" % PORT)
+	c3.join("127.0.0.1:%d" % _port)
 	_check(await _until(func() -> bool: return c3.role == Main.Role.OFFLINE, 5.0), "a different build should be rejected")
 	_check(c3.notice.contains("same version"), "and told why (%s)" % c3.notice)
 	_check(host.waiting_t < 30, "a rejected client mustn't stall the host")
@@ -211,8 +243,8 @@ func _run() -> void:
 	h2.fake_lag_ms = 60
 	c4.fake_lag_ms = 60
 	await physics_frame
-	h2.host_lan(PORT + 1)
-	c4.join("127.0.0.1:%d" % (PORT + 1))
+	h2.host_lan(_port + 1)
+	c4.join("127.0.0.1:%d" % (_port + 1))
 	_check(await _until(func() -> bool: return c4.in_lobby and h2.lobby.size() == 2, 8.0), "client should reach the lobby")
 	h2.start_match()
 	_check(await _until(func() -> bool: return c4._started, 8.0), "client should get the match")
@@ -249,9 +281,9 @@ func _run() -> void:
 	var relay_node := RelayNode.new()
 	relay_node.relay = RelayServer.new()
 	relay_node.relay.quiet = true
-	_check(relay_node.relay.start(PORT + 2, "127.0.0.1") == OK, "relay should start")
+	_check(relay_node.relay.start(_port + 2, "127.0.0.1") == OK, "relay should start")
 	root.add_child(relay_node)
-	var relay_at := "127.0.0.1:%d" % (PORT + 2)
+	var relay_at := "127.0.0.1:%d" % (_port + 2)
 	var rh := _game(8)
 	var rc := _game(9)
 	for g in [rh, rc]:
@@ -291,7 +323,7 @@ func _run() -> void:
 
 	_current = "relay: another game shares it, with its own room size and channels"
 	var at := "127.0.0.1"
-	var rport := PORT + 2
+	var rport := _port + 2
 	var oh := RelayClient.new()
 	var o1 := RelayClient.new()
 	var o2 := RelayClient.new()
@@ -349,7 +381,7 @@ func _run() -> void:
 
 	_current = "relay: unreachable relay"
 	var rz := _game(11)
-	rz.relay_address = "127.0.0.1:%d" % (PORT + 3) # nothing listens here
+	rz.relay_address = "127.0.0.1:%d" % (_port + 3) # nothing listens here
 	await physics_frame
 	rz.host()
 	_check(await _until(func() -> bool: return rz.role == Main.Role.OFFLINE, 12.0), "hosting should give up")
@@ -361,7 +393,9 @@ func _run() -> void:
 	relay_node.relay.stop()
 	relay_node.queue_free()
 	await process_frame
-	print("\n%s" % ("ALL TESTS PASSED" if _failed == 0 else "%d TEST(S) FAILED" % _failed))
+	print("\n%s in %.1f s" % ["ALL TESTS PASSED" if _failed == 0 else "%d TEST(S) FAILED" % _failed,
+			(Time.get_ticks_msec() - _started) / 1000.0])
+	_watchdog.stop()
 	quit(1 if _failed > 0 else 0)
 
 
@@ -371,8 +405,8 @@ func _lobby_tests() -> void:
 	var la := _game(21, "Ann")
 	var lb := _game(22, "Bo")
 	await physics_frame
-	lh.host_lan(PORT + 4)
-	var at := "127.0.0.1:%d" % (PORT + 4)
+	lh.host_lan(_port + 4)
+	var at := "127.0.0.1:%d" % (_port + 4)
 	la.join(at)
 	_check(await _until(func() -> bool: return la.in_lobby, 6.0), "Ann should get in")
 	lb.join(at)
@@ -521,8 +555,10 @@ func _check_sync(a: Node, b: Node, at_least: int) -> void:
 
 var _ok_before := 0
 func _report() -> void:
-	print("%s  %s" % ["ok  " if _failed == _ok_before else "FAIL", _current])
+	var now := Time.get_ticks_msec()
+	print("%s  %5.1f s  %s" % ["ok  " if _failed == _ok_before else "FAIL", (now - _section_from) / 1000.0, _current])
 	_ok_before = _failed
+	_section_from = now
 
 
 func _check(cond: bool, what: String) -> void:

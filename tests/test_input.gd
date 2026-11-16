@@ -5,6 +5,7 @@ extends SceneTree
 ## file, so the player's own settings are never touched.
 ##   godot --headless --path . --script tests/test_input.gd
 
+const Watchdog = preload("res://tests/watchdog.gd")
 const Settings = preload("res://scripts/settings.gd")
 const LocalInput = preload("res://scripts/input/local_input.gd")
 const SettingsPage = preload("res://scripts/ui/settings_page.gd")
@@ -13,7 +14,13 @@ const Hud = preload("res://scripts/view/hud.gd")
 const SCRATCH := "user://test_input_settings.cfg"
 const PAD := 0
 
+## Fails the run, saying where it was, if it takes longer than this; a normal
+## run takes under a second.
+const TIME_LIMIT := 10
+
 var _failed := 0
+var _last := "" # the last check, for the watchdog to name
+var _watchdog: Watchdog
 
 
 ## Godot can't fake a connected gamepad, so this one says pad 0 is plugged in;
@@ -28,6 +35,7 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	_watchdog = Watchdog.new(TIME_LIMIT, func() -> String: return "after the check \"%s\"" % _last)
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(SCRATCH))
 	Settings.path = SCRATCH
 	Settings._cfg = null
@@ -126,6 +134,7 @@ func _run() -> void:
 	page.queue_free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(SCRATCH))
 	print("ALL TESTS PASSED" if _failed == 0 else "%d FAILED" % _failed)
+	_watchdog.stop()
 	quit(1 if _failed > 0 else 0)
 
 
@@ -161,6 +170,7 @@ func _key(k: Key) -> void:
 
 
 func _check(cond: bool, what: String) -> void:
+	_last = what
 	print("  %s  %s" % ["ok  " if cond else "FAIL", what])
 	if not cond:
 		_failed += 1

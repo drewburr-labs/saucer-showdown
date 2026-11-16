@@ -2,12 +2,20 @@ extends SceneTree
 ## Headless tests for the updater's version and asset logic.
 ## Run: godot --headless --path . --script tests/test_updater.gd
 
+const Watchdog = preload("res://tests/watchdog.gd")
 const Updater = preload("res://scripts/update/updater.gd")
 
+## Fails the run, saying where it was, if it takes longer than this; a normal
+## run takes well under a second.
+const TIME_LIMIT := 10
+
 var _failed := 0
+var _last := "" # the last check, for the watchdog to name
+var _watchdog: Watchdog
 
 
 func _init() -> void:
+	_watchdog = Watchdog.new(TIME_LIMIT, func() -> String: return "after the check \"%s\"" % _last)
 	# [candidate, current, should update]
 	var cases := [
 		["v0.2.0", "v0.1.0", true],
@@ -48,6 +56,7 @@ func _init() -> void:
 	_test_retry()
 
 	print("ALL TESTS PASSED" if _failed == 0 else "%d FAILED" % _failed)
+	_watchdog.stop()
 	quit(1 if _failed > 0 else 0)
 
 
@@ -77,6 +86,7 @@ func _test_retry() -> void:
 
 
 func _check(ok: bool, what: String) -> void:
+	_last = what
 	if not ok:
 		_failed += 1
 		printerr("FAIL: ", what)
