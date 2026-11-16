@@ -24,9 +24,8 @@ func _initialize() -> void:
 
 func _process(delta: float) -> bool:
 	if _t == 0.0:
+		_main.call("start_local", 3)
 		_main.set("show_help", false)
-		_main.set("greys_per_team", 3)
-		_main.call("_new_match")
 	_t += delta
 	if not _times.is_empty() and _t >= _times[0]:
 		var img := root.get_texture().get_image()

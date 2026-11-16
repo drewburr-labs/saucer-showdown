@@ -13,6 +13,11 @@ extends Node2D
 ## the network unless the present gets MAX_AHEAD ticks past the confirmed
 ## frames. Offline, every frame is confirmed at once and nothing is predicted.
 ## Restarts, pause and the score are the host's call.
+##
+## Outside a match the game sits in the menus (menus.gd) with a bot match
+## playing behind them. Online, the room waits in the lobby between matches:
+## everyone names themselves and picks a team, the host picks the team size
+## and starts, and when the match is decided everyone comes back.
 
 const Cfg = preload("res://scripts/sim/config.gd")
 const E = preload("res://scripts/sim/entities.gd")
@@ -24,7 +29,8 @@ const RelayLink = preload("res://scripts/net/relay_link.gd")
 const RP = preload("res://relay/relay_protocol.gd")
 const ArenaView = preload("res://scripts/view/arena_view.gd")
 const Hud = preload("res://scripts/view/hud.gd")
-const OnlineMenu = preload("res://scripts/view/online_menu.gd")
+const Menus = preload("res://scripts/ui/menus.gd")
+const Settings = preload("res://scripts/settings.gd")
 const Updater = preload("res://scripts/update/updater.gd")
 
 enum Role { OFFLINE, HOST, CLIENT }
@@ -38,10 +44,16 @@ const SYNC_EVERY := 30 # host tells clients how early their inputs arrive this o
 const TARGET_LEAD := 1.0 # ticks early a client's input should reach the host
 const WAIT_NOTICE := 30 # ticks stalled before the HUD says so
 const PING_EVERY := 60 # clients time a round trip to the host this often
+const BACK_TO_LOBBY := 600 # ticks after a match is won before everyone goes back on their own
+const TEAM_SIZES := [1, 2, 3] # greys per team: 2v2, 3v3, 4v4
 
-var sim: Sim
+var sim: Sim # the match, or the bots playing behind the menus
+var in_match := false
 var humans: Dictionary = {} # host: "peer:device" -> {"team": int, "idx": int}; idx 0 is the Overlord
-var greys_per_team := 1 # 1 = the 2v2 prototype, 3 = full 4v4
+var greys_per_team := 1 # 1 = 2v2, 2 = 3v3, 3 = 4v4
+var lobby: Array = [] # online: [{"id": peer id, "name": String, "team": int}], in join order
+var in_lobby := false # online: the host has us in its room
+var player_name := "" # what this machine's player is called online
 var map_wins := [0, 0]
 var match_winner := -1
 var win_confirmed := false # sim.winner is set and every frame up to it is confirmed
@@ -75,7 +87,8 @@ var _help_ticks := 480 # the controls overlay hides itself after 8 s
 var _input = LocalInput.new() # untyped so tests can script it
 var _view: ArenaView
 var _hud: Hud
-var _menu: OnlineMenu
+var _menu: Menus
+var _help_once := false
 var _host_port := NetPeer.PORT
 var _join_addr := ""
 
@@ -110,15 +123,17 @@ func _ready() -> void:
 	_hud = Hud.new()
 	_hud.game = self
 	add_child(_hud)
-	_menu = OnlineMenu.new()
-	_menu.game = self
-	add_child(_menu)
 	updater = Updater.new()
 	add_child(updater)
 	updater.check()
+	_menu = Menus.new()
+	_menu.game = self
+	add_child(_menu)
+	Settings.apply_all()
 	_peers[LOCAL] = _peer_state(true)
-	humans[_key(LOCAL, "kb1")] = {"team": 0, "idx": 0}
-	_new_map()
+	player_name = Settings.player_name()
+	show_help = false
+	_start_attract()
 	_read_cmdline()
 
 
@@ -135,6 +150,8 @@ func _read_cmdline() -> void:
 			fake_lag_ms = int(a.trim_prefix("--lag="))
 		elif a.begins_with("--relay="):
 			relay_address = a.trim_prefix("--relay=")
+		elif a.begins_with("--local"):
+			start_local(clampi(int(a.trim_prefix("--local=")), 1, 3) if a.contains("=") else 1)
 	if host_now:
 		host_lan(_host_port)
 	elif _join_addr != "":
@@ -158,7 +175,7 @@ func host() -> String:
 	role = Role.HOST
 	room_code = ""
 	input_delay = ONLINE_DELAY
-	_refresh_labels()
+	_open_lobby()
 	net_status = "Opening a room…"
 	return ""
 
@@ -178,7 +195,7 @@ func host_lan(port: int = NetPeer.PORT) -> String:
 	role = Role.HOST
 	_host_port = port
 	input_delay = ONLINE_DELAY
-	_refresh_labels()
+	_open_lobby()
 	_say("Hosting. Friends join at %s" % _host_address())
 	return ""
 
@@ -212,6 +229,7 @@ func join(where: String) -> String:
 	role = Role.CLIENT
 	_join_addr = where
 	_started = false
+	_end_local_match()
 	_epoch = -1
 	input_delay = ONLINE_DELAY
 	paused = false
@@ -228,6 +246,7 @@ func _split_port(address: String, fallback: int) -> int:
 	return int(address.get_slice(":", 1)) if address.count(":") == 1 else fallback
 
 
+## Leave the room (or close it, as host) and go back to the menus.
 func leave() -> void:
 	_go_offline("")
 
@@ -236,27 +255,32 @@ func _go_offline(reason: String) -> void:
 	if net != null:
 		net.close()
 		net = null
-	var was_client := role == Role.CLIENT
 	role = Role.OFFLINE
 	input_delay = 0
 	net_status = ""
 	room_code = ""
 	ping_ms = -1
 	_started = false
+	in_lobby = false
+	lobby.clear()
 	for id: int in _peers.keys():
 		if id != LOCAL:
 			_drop_peer(id)
 	if reason != "":
 		_say(reason)
-	if was_client:
-		# The host's match leaves with the host: start a fresh local one.
-		paused = false
-		humans = {_key(LOCAL, "kb1"): {"team": 0, "idx": 0}}
-		_new_match()
-	else:
-		_refresh_labels()
-		# Inputs sampled ahead for the online delay still get used; the
-		# present simply catches up with them.
+	_stop_match()
+
+
+## Host: a fresh room with just us in it, sitting in the lobby.
+func _open_lobby() -> void:
+	_end_local_match()
+	in_lobby = true
+	lobby = [{"id": LOCAL, "name": player_name, "team": 0}]
+
+
+func _end_local_match() -> void:
+	if in_match:
+		_stop_match()
 
 
 func _ensure_fingerprint() -> void:
@@ -271,6 +295,76 @@ func _host_address() -> String:
 
 
 # --- Matches -------------------------------------------------------------
+
+## Play on this machine against bots; more local players join with Enter or Start.
+func start_local(greys: int) -> void:
+	if role != Role.OFFLINE:
+		leave()
+	greys_per_team = greys
+	humans = {_key(LOCAL, "kb1"): {"team": 0, "idx": 0}}
+	_start_match()
+
+
+## Host: everyone in the lobby takes a seat on the team they picked.
+func start_match() -> void:
+	if role != Role.HOST or in_match:
+		return
+	humans.clear()
+	for e: Dictionary in lobby:
+		humans[_key(e["id"], "kb1")] = {"team": e["team"], "idx": 0}
+	_start_match()
+	_send_lobby()
+
+
+func _start_match() -> void:
+	in_match = true
+	paused = false
+	_prev_buttons.clear()
+	if not _help_once:
+		# Show the controls for the first few seconds of the first match.
+		_help_once = true
+		show_help = true
+		_help_ticks = 480
+	_new_match()
+
+
+## Host or offline: the match is over (or abandoned); back to the lobby or menu.
+func end_match() -> void:
+	if role == Role.CLIENT or not in_match:
+		return
+	_stop_match()
+	_send_lobby()
+
+
+func _stop_match() -> void:
+	in_match = false
+	paused = false
+	humans.clear()
+	map_wins = [0, 0]
+	match_winner = -1
+	_start_attract()
+
+
+## Bots playing a 4v4 behind the menus. It never touches the network.
+func _start_attract() -> void:
+	if sim != null:
+		sim.dispose()
+	sim = Sim.new(randi(), 3)
+	_view.sim = sim
+	_view.labels = {}
+	win_confirmed = false
+	waiting_t = 0
+	you = ""
+	_shown.clear()
+
+
+func _step_attract() -> void:
+	if sim.winner >= 0:
+		_start_attract()
+	sim.step_frame(InputFrame.all_bots(sim.units.size()))
+	if not sim.events.is_empty():
+		_view.add_events(sim.events)
+
 
 func _new_match() -> void:
 	map_wins = [0, 0]
@@ -334,7 +428,7 @@ func _send_start(peer: int) -> void:
 
 func _advance_map() -> void:
 	if match_winner >= 0:
-		_new_match()
+		end_match()
 	else:
 		_new_map()
 
@@ -350,6 +444,14 @@ func _physics_process(_delta: float) -> void:
 	notice_t = maxf(0.0, notice_t - Cfg.TICK)
 	if net != null:
 		_net_events()
+	if not in_match:
+		_step_attract()
+		if role == Role.CLIENT and in_lobby and Engine.get_physics_frames() % PING_EVERY == 0:
+			net.send(LOCAL, [Msg.PING, Time.get_ticks_msec()])
+		if net != null:
+			net.flush()
+		_update_status()
+		return
 	if role != Role.CLIENT:
 		_assemble()
 	_reconcile()
@@ -579,6 +681,9 @@ func _check_win() -> void:
 		if map_wins[sim.winner] >= Cfg.MAPS_TO_WIN:
 			match_winner = sim.winner
 	_win_ticks += 1
+	if match_winner >= 0 and _win_ticks > BACK_TO_LOBBY and role != Role.CLIENT:
+		end_match()
+		return
 	# Ignore the first second so a held key can't skip the banner.
 	if _win_ticks <= 60 or not _wants_next():
 		return
@@ -624,15 +729,18 @@ func _net_events() -> void:
 					_peers[ev[1]] = _peer_state(false)
 			"leave":
 				if role == Role.HOST and _peers.has(ev[1]):
-					var had := _labels_of(ev[1])
+					var had := _name_of(ev[1])
+					var seated := _labels_of(ev[1]) != ""
 					_drop_peer(ev[1])
 					_refresh_labels()
-					_say("%s left; bots take over." % had if had != "" else "A player left.")
+					_send_lobby()
+					if had != "":
+						_say("%s left; a bot takes over." % had if seated else "%s left." % had)
 			"room":
 				room_code = ev[1]
-				_say("Room code %s. Friends press F6 and type it in." % room_code)
+				_say("Room %s is open. Friends pick Play online and type the code in." % room_code)
 			"connected":
-				net.send(LOCAL, [Msg.HELLO, NetPeer.PROTOCOL, updater.version, fingerprint])
+				net.send(LOCAL, [Msg.HELLO, NetPeer.PROTOCOL, updater.version, fingerprint, player_name])
 				net_status = "Connected, waiting for the host…"
 			"refused":
 				_go_offline(ev[1])
@@ -645,7 +753,7 @@ func _net_events() -> void:
 				if role == Role.HOST:
 					_go_offline("Lost the connection to the relay server.")
 				else:
-					_go_offline("The host closed the game." if _started else "The host turned us away.")
+					_go_offline("The host closed the game." if in_lobby else "The host turned us away.")
 			"msg":
 				if role == Role.HOST:
 					_host_msg(ev[1], ev[2])
@@ -661,19 +769,39 @@ func _host_msg(id: int, m: Array) -> void:
 	var p: Dictionary = _peers[id]
 	match m[0]:
 		Msg.HELLO:
-			if p["greeted"] or not NetPeer.valid(m, [TYPE_INT, TYPE_STRING, TYPE_INT]):
+			if p["greeted"] or m.size() < 2 or not m[1] is int:
 				return
-			if m[1] != NetPeer.PROTOCOL or m[3] != fingerprint:
-				net.send(id, [Msg.REJECT, "The host runs %s and you run %s. Everyone needs the same version." % [updater.version, m[2]]])
+			# Check the version before the shape, so an older build is told why.
+			if m[1] != NetPeer.PROTOCOL or not NetPeer.valid(m, [TYPE_INT, TYPE_STRING, TYPE_INT, TYPE_STRING]) \
+					or m[3] != fingerprint:
+				var theirs: String = m[2] if m.size() > 2 and m[2] is String else "an older version"
+				net.send(id, [Msg.REJECT, "The host runs %s and you run %s. Everyone needs the same version." % [updater.version, theirs]])
 				return
+			if lobby.size() >= room_size():
+				net.send(id, [Msg.REJECT, "That room is full: %d of %d players for a %s." % [lobby.size(), room_size(), size_name(greys_per_team)]])
+				return
+			var name := Settings.clean_name(m[4])
+			if name == "":
+				name = "Player %d" % (lobby.size() + 1)
+			var team := 0 if _team_count(0) <= _team_count(1) else 1
+			lobby.append({"id": id, "name": name, "team": team})
 			p["greeted"] = true
 			p["from"] = _confirmed
-			_send_start(id)
-			_join(_key(id, "kb1"))
-			_refresh_labels()
-			_say("%s joined." % _labels_of(id) if _labels_of(id) != "" else "A player joined to watch.")
+			if in_match:
+				# Mid-match: straight into a free seat on the smaller team.
+				_send_start(id)
+				_seat(_key(id, "kb1"), team, 0)
+				_refresh_labels()
+			_send_lobby()
+			_say("%s joined." % name)
+		Msg.TEAM:
+			if p["greeted"] and NetPeer.valid(m, [TYPE_INT]):
+				_set_team(id, m[1])
+		Msg.NAME:
+			if p["greeted"] and NetPeer.valid(m, [TYPE_STRING]):
+				_rename(id, m[1])
 		Msg.INPUT:
-			if not p["greeted"] or not NetPeer.valid(m, [TYPE_INT, TYPE_INT, TYPE_PACKED_BYTE_ARRAY]):
+			if not in_match or not p["greeted"] or not NetPeer.valid(m, [TYPE_INT, TYPE_INT, TYPE_PACKED_BYTE_ARRAY]):
 				return
 			var t: int = m[2]
 			if m[1] != _epoch or m[3].size() != LocalInput.PACKET_BYTES:
@@ -683,14 +811,14 @@ func _host_msg(id: int, m: Array) -> void:
 				p["lead"] += float(t - sim.tick)
 				p["leads"] += 1
 		Msg.NEXT:
-			if p["greeted"] and NetPeer.valid(m, [TYPE_INT]) and m[1] == _epoch \
+			if in_match and p["greeted"] and NetPeer.valid(m, [TYPE_INT]) and m[1] == _epoch \
 					and win_confirmed and _win_ticks > 60:
 				_advance_map()
 		Msg.PING:
 			if p["greeted"] and NetPeer.valid(m, [TYPE_INT]):
 				net.send(id, [Msg.PONG, m[1]])
 		Msg.SUM:
-			if not p["greeted"] or not NetPeer.valid(m, [TYPE_INT, TYPE_INT, TYPE_INT]):
+			if not in_match or not p["greeted"] or not NetPeer.valid(m, [TYPE_INT, TYPE_INT, TYPE_INT]):
 				return
 			if m[1] == _epoch and _sums.has(m[2]) and _sums[m[2]] != m[3]:
 				# Out of step: send the client the current state to carry on from.
@@ -706,9 +834,15 @@ func _client_msg(m: Array) -> void:
 				_go_offline(m[1])
 		Msg.START:
 			if not NetPeer.valid(m, [TYPE_INT, TYPE_INT, TYPE_INT, TYPE_INT, TYPE_INT, TYPE_INT,
-					TYPE_PACKED_BYTE_ARRAY, TYPE_BOOL]) or not m[3] in [1, 3]:
+					TYPE_PACKED_BYTE_ARRAY, TYPE_BOOL]) or not m[3] in TEAM_SIZES:
 				return
 			var resync: bool = _started and m[1] == _epoch
+			if not in_match:
+				in_match = true
+				if not _help_once:
+					_help_once = true
+					show_help = true
+					_help_ticks = 480
 			_epoch = m[1]
 			_seed = m[2]
 			map_wins = [m[4], m[5]]
@@ -724,8 +858,24 @@ func _client_msg(m: Array) -> void:
 					and m[3].size() == sim.units.size() * InputFrame.UNIT_BYTES:
 				_confirm(m[2], m[3])
 		Msg.SEATS:
+			# The host sends these just before START, so take them in the lobby too.
 			if NetPeer.valid(m, [TYPE_ARRAY]):
 				_apply_seats(m[1])
+		Msg.LOBBY:
+			if not NetPeer.valid(m, [TYPE_INT, TYPE_BOOL, TYPE_ARRAY]) or not m[1] in TEAM_SIZES:
+				return
+			var list := []
+			for e in m[3]:
+				if e is Array and e.size() == 3 and e[0] is int and e[1] is String and e[2] is int and e[2] in [0, 1]:
+					list.append({"id": e[0], "name": e[1], "team": e[2]})
+			lobby = list
+			in_lobby = true
+			if not in_match:
+				greys_per_team = m[1]
+			elif not m[2]:
+				# The host ended the match: back to the lobby.
+				_started = false
+				_stop_match()
 		Msg.PAUSE:
 			if NetPeer.valid(m, [TYPE_BOOL]):
 				paused = m[1]
@@ -745,6 +895,9 @@ func _peer_state(greeted: bool) -> Dictionary:
 
 func _drop_peer(id: int) -> void:
 	_peers.erase(id)
+	for i in range(lobby.size() - 1, -1, -1):
+		if lobby[i]["id"] == id:
+			lobby.remove_at(i)
 	var prefix := "%d:" % id
 	for key: String in humans.keys():
 		if key.begins_with(prefix):
@@ -752,6 +905,132 @@ func _drop_peer(id: int) -> void:
 	for key: String in _prev_buttons.keys():
 		if key.begins_with(prefix):
 			_prev_buttons.erase(key)
+
+
+# --- Lobby ---------------------------------------------------------------
+
+## Players a room holds at the current team size.
+func room_size() -> int:
+	return 2 * (1 + greys_per_team)
+
+
+static func size_name(greys: int) -> String:
+	return "%dv%d" % [greys + 1, greys + 1]
+
+
+func team_count(team: int) -> int:
+	return _team_count(team)
+
+
+func _team_count(team: int) -> int:
+	var n := 0
+	for e: Dictionary in lobby:
+		if e["team"] == team:
+			n += 1
+	return n
+
+
+## This machine's peer id in the lobby.
+func my_id() -> int:
+	return net.id() if net != null else LOCAL
+
+
+## Ask to play for `team`. The host has the last word, and a full team says no.
+func pick_team(team: int) -> String:
+	if not in_lobby or in_match:
+		return ""
+	if _team_count(team) >= 1 + greys_per_team:
+		return "%s is full." % Cfg.TEAM_NAMES[team]
+	if role == Role.CLIENT:
+		net.send(LOCAL, [Msg.TEAM, team])
+	else:
+		_set_team(LOCAL, team)
+	return ""
+
+
+func _set_team(id: int, team: int) -> void:
+	if in_match or not team in [0, 1] or _team_count(team) >= 1 + greys_per_team:
+		return
+	for e: Dictionary in lobby:
+		if e["id"] == id and e["team"] != team:
+			e["team"] = team
+			_send_lobby()
+
+
+## Host: change the team size (greys per team). Returns "" or why not.
+func set_team_size(greys: int) -> String:
+	if role == Role.CLIENT or in_match or not greys in TEAM_SIZES:
+		return ""
+	if lobby.size() > 2 * (1 + greys):
+		return "%d players won't fit in a %s." % [lobby.size(), size_name(greys)]
+	greys_per_team = greys
+	# Anyone over the new size moves to the other team, newest first.
+	for team in 2:
+		for i in range(lobby.size() - 1, -1, -1):
+			if _team_count(team) <= 1 + greys:
+				break
+			if lobby[i]["team"] == team:
+				lobby[i]["team"] = 1 - team
+	_send_lobby()
+	return ""
+
+
+## Set this player's name, for now and (if `save`) next time too.
+func set_player_name(text: String, save := true) -> void:
+	var name := Settings.clean_name(text)
+	if save:
+		Settings.set_value("name", name)
+	player_name = name if name != "" else "Player"
+	if role == Role.CLIENT:
+		if in_lobby:
+			net.send(LOCAL, [Msg.NAME, player_name])
+	elif in_lobby:
+		_rename(LOCAL, player_name)
+
+
+func _rename(id: int, text: String) -> void:
+	var name := Settings.clean_name(text)
+	if name == "":
+		return
+	for e: Dictionary in lobby:
+		if e["id"] == id and e["name"] != name:
+			e["name"] = name
+			_refresh_labels()
+			_send_lobby()
+
+
+func _name_of(id: int) -> String:
+	for e: Dictionary in lobby:
+		if e["id"] == id:
+			return e["name"]
+	return ""
+
+
+func via_relay() -> bool:
+	return net is RelayLink
+
+
+func menu_open() -> bool:
+	return _menu.is_open()
+
+
+## Host: tell everyone who is in the room.
+func _send_lobby() -> void:
+	if role != Role.HOST or net == null:
+		return
+	var entries := []
+	for e: Dictionary in lobby:
+		entries.append([e["id"], e["name"], e["team"]])
+	net.send(0, [Msg.LOBBY, greys_per_team, in_match, entries])
+
+
+## Host or offline: pause or unpause the match for everyone.
+func set_paused(on: bool) -> void:
+	if role == Role.CLIENT or not in_match or paused == on:
+		return
+	paused = on
+	if net != null:
+		net.send(0, [Msg.PAUSE, paused])
 
 
 # --- Seats (host and offline) -------------------------------------------
@@ -786,14 +1065,24 @@ func _seat(key: String, team: int, want: int) -> void:
 	humans.erase(key) # team is full of humans
 
 
-## Number the seated players and tell everyone who is where.
+## Label the seated players and tell everyone who is where. Online a
+## player shows by name (a second player at the same machine as "Name 2");
+## offline as P1, P2...
 func _refresh_labels() -> void:
+	if not in_match:
+		return
 	var entries := []
+	var per_peer := {}
 	for key: String in humans:
 		if not _player_no.has(key):
 			_player_no[key] = _next_player
 			_next_player += 1
-		entries.append([_unit_of(key).id, "P%d" % _player_no[key], int(key.get_slice(":", 0)), key.get_slice(":", 1)])
+		var peer := int(key.get_slice(":", 0))
+		var label := "P%d" % _player_no[key]
+		if role != Role.OFFLINE:
+			per_peer[peer] = per_peer.get(peer, 0) + 1
+			label = _name_of(peer) if per_peer[peer] == 1 else "%s %d" % [_name_of(peer), per_peer[peer]]
+		entries.append([_unit_of(key).id, label, peer, key.get_slice(":", 1)])
 	_apply_seats(entries)
 	if net != null:
 		net.send(0, [Msg.SEATS, entries])
@@ -818,9 +1107,9 @@ func _apply_seats(entries: Array) -> void:
 
 func _labels_of(peer: int) -> String:
 	var out := PackedStringArray()
-	for key: String in _player_no:
-		if key.begins_with("%d:" % peer) and humans.has(key):
-			out.append("P%d" % _player_no[key])
+	for key: String in humans:
+		if key.begins_with("%d:" % peer):
+			out.append(_view.labels.get(_unit_of(key).id, "P%d" % _player_no.get(key, 0)))
 	return ", ".join(out)
 
 
@@ -845,29 +1134,26 @@ func _update_status() -> void:
 			else:
 				net_status = "Hosting at %s  ·  %d joined" % [_host_address(), n]
 		Role.CLIENT:
-			if _started:
+			if in_lobby:
 				var where := "Room %s" % room_code if room_code != "" else "Online"
 				net_status = "%s  ·  %s" % [where, "%d ms" % ping_ms if ping_ms >= 0 else "…"]
 
 
+## Esc (the in-game menu) is handled by the menus.
 func _unhandled_key_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if key == null or not key.pressed or key.echo:
 		return
-	var host_only := "Only the host can do that."
 	match key.physical_keycode:
 		KEY_F1:
-			show_help = not show_help
-			_help_ticks = 0
-		KEY_F2:
-			if role == Role.CLIENT:
-				_say(host_only)
-				return
-			greys_per_team = 3 if greys_per_team == 1 else 1
-			_new_match()
+			if in_match:
+				show_help = not show_help
+				_help_ticks = 0
 		KEY_F3:
-			if role == Role.CLIENT:
-				_say(host_only)
+			if not in_match:
+				return
+			if role != Role.OFFLINE:
+				_say("Spectating is for local games.")
 				return
 			var k1 := _key(LOCAL, "kb1")
 			if humans.has(k1):
@@ -877,22 +1163,6 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_refresh_labels()
 		KEY_F5:
 			updater.install()
-		KEY_F6:
-			_menu.toggle()
-		KEY_R:
-			if role == Role.CLIENT:
-				_say(host_only)
-				return
-			_new_match()
-		KEY_ESCAPE:
-			if _menu.is_open():
-				_menu.toggle()
-			elif role == Role.CLIENT:
-				_say("Only the host can pause.")
-			else:
-				paused = not paused
-				if net != null:
-					net.send(0, [Msg.PAUSE, paused])
 
 
 func _exit_tree() -> void:

@@ -2,7 +2,9 @@ extends SceneTree
 ## Online play over loopback: a host and two clients in one process, each a
 ## full game with scripted "players". Checks that every machine's sim agrees
 ## on every tick, through a late join, a new map, a player leaving and a
-## mismatched build being turned away. Runs in real time, about 15 s.
+## mismatched build being turned away; and that the lobby handles names,
+## teams, team sizes, a full room and coming back after a match. Runs in real
+## time, about 25 s.
 ##   godot --headless --path . --script tests/test_net.gd
 
 const Main = preload("res://scripts/main.gd")
@@ -57,30 +59,53 @@ func _initialize() -> void:
 
 
 func _run() -> void:
-	_current = "offline win: banner, score, next map"
+	_current = "starts at the menus, local play from there"
 	var solo := _game(7)
 	await physics_frame
+	_check(not solo.in_match and solo._menu.page() == "home", "the game should open on the home screen (%s)" % solo._menu.page())
+	solo.start_local(2)
+	await _settle()
+	_check(solo.in_match and solo.sim.greys_per_team == 2 and not solo._menu.is_open(), "Play local should start a 3v3 with the menus out of the way")
+	_check(solo.humans.size() == 1, "player 1 should have a seat")
+	_report()
+
+	_current = "offline win: banner, score, next map"
+	await physics_frame # so the win lands right before the game's own tick
 	solo.sim._win(0, Sim.Win.ECONOMIC)
 	await physics_frame
 	_check(solo.win_confirmed and solo.map_wins == [1, 0], "a win should count at once offline (%s)" % [solo.map_wins])
 	var solo_epoch: int = solo._epoch
 	_check(await _until(func() -> bool: return solo._epoch > solo_epoch, 4.0), "a press after the banner starts the next map")
 	_check(not solo.win_confirmed and solo.map_wins == [1, 0], "the next map starts clean, score kept")
+	_report()
+
+	_current = "offline match won: back to the local menu"
+	solo.sim._win(0, Sim.Win.MILITARY)
+	await physics_frame
+	_check(solo.match_winner == 0, "a second map win takes the match")
+	_check(await _until(func() -> bool: return not solo.in_match, 4.0), "a press after the banner ends the match")
+	await _settle()
+	_check(solo._menu.page() == "local", "and goes back to local setup (%s)" % solo._menu.page())
 	solo.queue_free()
 	_report()
 
-	var host := _game(1)
-	var c1 := _game(2)
+	var host := _game(1, "Hana")
+	var c1 := _game(2, "Cleo")
 	await physics_frame
 	_check(host.host_lan(PORT) == "", "host should start")
-	c1.sums_log.clear() # forget its own offline game
 	_check(c1.join("127.0.0.1:%d" % PORT) == "", "client should start connecting")
 
-	_current = "client joins and plays"
+	_current = "client joins the lobby, host starts, they play"
+	_check(await _until(func() -> bool: return c1.in_lobby and c1.lobby.size() == 2, 8.0), "client should reach the lobby within 8 s")
+	_check(not c1.in_match and not host.in_match, "nobody plays until the host starts")
+	_check(host._name_of(c1.net.id()) == "Cleo" and c1._name_of(1) == "Hana", "both should see each other's names")
+	await _settle()
+	_check(c1._menu.page() == "lobby" and host._menu.page() == "lobby", "both should be looking at the lobby")
+	host.start_match()
 	_check(await _until(func() -> bool: return c1._started and c1.sim.tick > 240, 8.0), "client should be playing within 8 s")
 	var key1 := "%d:kb1" % c1.net.id()
 	_check(host.humans.has(key1), "the client's keyboard should have a seat")
-	_check(c1.you != "", "the client should know its label (%s)" % c1.you)
+	_check(c1.you == "Cleo", "the client's unit should carry its name (%s)" % c1.you)
 	var unit_id: int = host._unit_of(key1).id
 	_check(await _until(func() -> bool: return host.sim.units[unit_id].in_move != Vector2.ZERO, 2.0),
 			"the client's input should drive its unit on the host")
@@ -88,9 +113,8 @@ func _run() -> void:
 	_report()
 
 	_current = "second client joins mid-map"
-	var c2 := _game(3)
+	var c2 := _game(3, "Dax")
 	await physics_frame
-	c2.sums_log.clear()
 	c2.join("127.0.0.1:%d" % PORT)
 	_check(await _until(func() -> bool: return c2._started, 8.0), "late joiner should get the match")
 	var joined_at: int = c2.sim.tick
@@ -114,7 +138,8 @@ func _run() -> void:
 	var tick_before: int = host.sim.tick
 	c1.leave()
 	_check(await _until(func() -> bool: return not host.humans.has(key1), 5.0), "host should free the leaver's seat")
-	_check(c1.role == Main.Role.OFFLINE, "the leaver is back to a local game")
+	_check(c1.role == Main.Role.OFFLINE and not c1.in_match, "the leaver is back at the menus")
+	_check(host._name_of(int(key1.get_slice(":", 0))) == "" and host.lobby.size() == 2, "and out of the host's lobby (%d)" % host.lobby.size())
 	_check(await _until(func() -> bool: return host.sim.tick > tick_before + 120, 5.0), "host keeps going without them")
 	_check_sync(host, c2, 200)
 	_report()
@@ -160,8 +185,9 @@ func _run() -> void:
 	c4.fake_lag_ms = 60
 	await physics_frame
 	h2.host_lan(PORT + 1)
-	c4.sums_log.clear()
 	c4.join("127.0.0.1:%d" % (PORT + 1))
+	_check(await _until(func() -> bool: return c4.in_lobby and h2.lobby.size() == 2, 8.0), "client should reach the lobby")
+	h2.start_match()
 	_check(await _until(func() -> bool: return c4._started, 8.0), "client should get the match")
 	var t0: int = h2.sim.tick
 	var f0 := Engine.get_physics_frames()
@@ -190,6 +216,8 @@ func _run() -> void:
 		g.queue_free()
 	await process_frame
 
+	await _lobby_tests()
+
 	_current = "relay: host gets a room code, a friend joins with it"
 	var relay_node := RelayNode.new()
 	relay_node.relay = RelayServer.new()
@@ -205,8 +233,10 @@ func _run() -> void:
 	await physics_frame
 	_check(rh.host() == "", "hosting through the relay should start")
 	_check(await _until(func() -> bool: return rh.room_code.length() == 5, 4.0), "host should get a room code (%s)" % rh.room_code)
-	rc.sums_log.clear()
 	_check(rc.join(rh.room_code.to_lower()) == "", "joining by code should start (any case)")
+	_check(await _until(func() -> bool: return rc.in_lobby and rc.lobby.size() == 2, 8.0), "friend should reach the lobby")
+	_check(rc.room_code == rh.room_code, "and know the room code to show")
+	rh.start_match()
 	_check(await _until(func() -> bool: return rc._started and rc.sim.tick > 300, 8.0), "friend should be playing through the relay")
 	_check(rh.humans.has("%d:kb1" % rc.net.id()), "friend should have a seat")
 	_check(rc.ping_ms >= 60, "ping should be the real round trip through the relay, fake lag included (%d ms)" % rc.ping_ms)
@@ -250,12 +280,125 @@ func _run() -> void:
 	quit(1 if _failed > 0 else 0)
 
 
-func _game(p_seed: int) -> Node:
+func _lobby_tests() -> void:
+	_current = "lobby: joiners are spread over the teams"
+	var lh := _game(20, "Host")
+	var la := _game(21, "Ann")
+	var lb := _game(22, "Bo")
+	await physics_frame
+	lh.host_lan(PORT + 4)
+	var at := "127.0.0.1:%d" % (PORT + 4)
+	la.join(at)
+	_check(await _until(func() -> bool: return la.in_lobby, 6.0), "Ann should get in")
+	lb.join(at)
+	_check(await _until(func() -> bool: return lb.in_lobby and la.lobby.size() == 3, 6.0), "Bo should get in, and Ann should see him")
+	_check(_teams(lh) == [0, 1, 0], "teams should alternate as people join (%s)" % [_teams(lh)])
+	_check(_teams(la) == _teams(lh) and _teams(lb) == _teams(lh), "everyone sees the same teams")
+	_report()
+
+	_current = "lobby: players pick teams, a full team says no"
+	_check(la.pick_team(0).contains("full"), "2v2: a third player can't join a team of two")
+	lb.pick_team(1)
+	_check(await _until(func() -> bool: return _teams(la) == [0, 1, 1], 3.0), "Bo's switch should reach everyone (%s)" % [_teams(la)])
+	lh.pick_team(1)
+	await _frames(20)
+	_check(_teams(lh) == [0, 1, 1], "the host can't overfill a team either (%s)" % [_teams(lh)])
+	lb.set_player_name("Bobo", false)
+	_check(await _until(func() -> bool: return la._name_of(lb.net.id()) == "Bobo", 3.0), "a rename should reach everyone")
+	_report()
+
+	_current = "lobby: the room fills up and says so"
+	var lc := _game(23, "Cy")
+	var ld := _game(24, "Di")
+	await physics_frame
+	lc.join(at)
+	_check(await _until(func() -> bool: return lc.in_lobby and lh.lobby.size() == 4, 6.0), "a fourth player fits a 2v2")
+	ld.join(at)
+	_check(await _until(func() -> bool: return ld.role == Main.Role.OFFLINE, 6.0), "a fifth is turned away")
+	_check(ld.notice.contains("full"), "and told the room is full (%s)" % ld.notice)
+	_check(lh.lobby.size() == 4, "the room still holds four")
+	_report()
+
+	_current = "lobby: the host picks the team size"
+	_check(la.set_team_size(2) == "" and la.greys_per_team == 1, "only the host can change it")
+	_check(lh.set_team_size(2) == "", "4 players fit a 3v3")
+	_check(await _until(func() -> bool: return la.greys_per_team == 2 and lc.greys_per_team == 2, 3.0), "everyone sees 3v3")
+	ld.join(at)
+	_check(await _until(func() -> bool: return ld.in_lobby and lh.lobby.size() == 5, 6.0), "now a fifth fits")
+	_check(lh.set_team_size(1).contains("won't fit"), "and the host can't shrink below five players")
+	_check(lh.greys_per_team == 2, "so it stays 3v3")
+	_report()
+
+	_current = "lobby: the match uses the lobby's teams, then everyone comes back"
+	lh.start_match()
+	var all := [la, lb, lc, ld]
+	_check(await _until(func() -> bool: return all.all(func(g) -> bool: return g._started and g.sim.tick > 60), 6.0), "everyone should be in the match")
+	_check(lh.sim.greys_per_team == 2 and la.sim.greys_per_team == 2, "it should be a 3v3")
+	var teams_ok := true
+	for e: Dictionary in lh.lobby:
+		var key := "%d:kb1" % e["id"]
+		if not lh.humans.has(key) or lh.humans[key]["team"] != e["team"]:
+			teams_ok = false
+	_check(teams_ok, "everyone plays for the team they picked")
+	await _settle()
+	_check(la._menu.page() == "", "the lobby gets out of the way")
+	var before: Array = _teams(lh)
+	lh.map_wins = [0, 1]
+	# A rollback can undo a win written straight into the sim, so keep writing it.
+	_check(await _until(func() -> bool:
+		if lh.sim.winner < 0:
+			lh.sim._win(1, Sim.Win.TRACTOR)
+		return lh.match_winner == 1, 3.0), "the host's win should decide the match")
+	_check(await _until(func() -> bool: return not lh.in_match and all.all(func(g) -> bool: return not g.in_match and g.in_lobby), 6.0),
+			"after the banner everyone goes back to the lobby")
+	await _settle()
+	_check(all.all(func(g) -> bool: return g._menu.page() == "lobby"), "and sees it")
+	_check(_teams(lh) == before and lh.lobby.size() == 5, "with the same players on the same teams")
+	lh.start_match()
+	_check(await _until(func() -> bool: return all.all(func(g) -> bool: return g._started and g.sim.tick > 60), 6.0), "and the host can start the next match")
+	_check_sync(lh, la, 40)
+	_report()
+
+	_current = "lobby: someone leaves mid-match, then the host closes the room"
+	var left: int = lc.net.id()
+	lc.leave()
+	_check(await _until(func() -> bool: return la.lobby.size() == 4 and la._name_of(left) == "", 4.0), "the leaver should drop off everyone's lobby")
+	lh.leave()
+	_check(await _until(func() -> bool: return all.all(func(g) -> bool: return g.role == Main.Role.OFFLINE), 6.0), "closing the room sends everyone home")
+	await _settle()
+	_check(la._menu.page() == "online", "back on the Play online page (%s)" % la._menu.page())
+	_report()
+	for g in [lh, la, lb, lc, ld]:
+		g.queue_free()
+	await process_frame
+
+
+func _teams(g: Node) -> Array:
+	var out := []
+	for e: Dictionary in g.lobby:
+		out.append(e["team"])
+	return out
+
+
+## Let the menus catch up: several physics steps can run before one _process.
+func _settle() -> void:
+	for i in 3:
+		await process_frame
+
+
+func _frames(n: int) -> void:
+	for i in n:
+		await physics_frame
+
+
+func _game(p_seed: int, name := "") -> Node:
 	var g = load("res://main.tscn").instantiate()
 	root.add_child(g)
 	g._input = ScriptedInput.new(p_seed)
 	g.record_sums = true
 	g.show_help = false
+	if name != "":
+		g.player_name = name
 	return g
 
 

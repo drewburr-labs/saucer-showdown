@@ -21,7 +21,7 @@ const HELP := [
 	["", ""],
 	["Win", "Shoot down the rival Overlord 3 times (3 hits each), bank 12 cows, or ride the tractor home."],
 	["", ""],
-	["", "F1 help  ·  F2 team size  ·  F3 spectate bots  ·  F5 update  ·  F6 play online  ·  R restart  ·  Esc pause"],
+	["", "F1 help  ·  F3 spectate bots (local)  ·  F5 update  ·  Esc menu"],
 ]
 
 var game # Main
@@ -46,7 +46,7 @@ func _process(delta: float) -> void:
 
 
 func _draw() -> void:
-	if game == null or game.sim == null:
+	if game == null or game.sim == null or not game.in_match:
 		return
 	var sim: Sim = game.sim
 	_draw_bar()
@@ -56,14 +56,14 @@ func _draw() -> void:
 
 	if game.win_confirmed:
 		_draw_banner(sim)
-	elif game.paused:
+	elif game.paused and not game.menu_open():
 		_draw_paused()
 	elif game.waiting_t > game.WAIT_NOTICE:
 		_draw_waiting()
 	if game.show_help:
 		_draw_help()
 	else:
-		_text(_font, Vector2(0, Cfg.H - 10), "F1 controls  ·  F6 online", 13, Color(1, 1, 1, 0.5), HORIZONTAL_ALIGNMENT_CENTER, Cfg.W)
+		_text(_font, Vector2(0, Cfg.H - 10), "F1 controls  ·  Esc menu", 13, Color(1, 1, 1, 0.5), HORIZONTAL_ALIGNMENT_CENTER, Cfg.W)
 	_draw_net()
 	_draw_update()
 
@@ -227,7 +227,12 @@ func _draw_banner(sim: Sim) -> void:
 	_text(_title, Vector2(0, top + 78), title.to_upper(), int(50 * bump), c.lightened(0.2), HORIZONTAL_ALIGNMENT_CENTER, Cfg.W, true, 10)
 	_text(_title, Vector2(0, top + 122), "%s victory   ·   maps %d – %d" % [Sim.WIN_NAMES[sim.win_reason], game.map_wins[0], game.map_wins[1]], 24, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, Cfg.W, true)
 	var blink := 0.55 + 0.35 * sin(_t * 3.0)
-	_text(_font, Vector2(0, top + 166), "Press Enter for %s" % ("a new match" if match_over else "the next map"), 18, Color(1, 1, 1, blink), HORIZONTAL_ALIGNMENT_CENTER, Cfg.W)
+	var next := "Press Enter for the next map"
+	if match_over:
+		var left := maxi(1, ceili((game.BACK_TO_LOBBY - game._win_ticks) / 60.0))
+		var where := "the lobby" if game.role != game.Role.OFFLINE else "the menu"
+		next = "Press Enter to go back to %s  ·  going in %d" % [where, left]
+	_text(_font, Vector2(0, top + 166), next, 18, Color(1, 1, 1, blink), HORIZONTAL_ALIGNMENT_CENTER, Cfg.W)
 
 
 func _draw_paused() -> void:

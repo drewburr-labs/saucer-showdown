@@ -7,12 +7,15 @@ extends RefCounted
 ## check each message's shape with valid() before trusting it.
 ##
 ## Protocol (first element is the Msg):
-##   client -> host  HELLO   protocol, version, sim fingerprint
+##   client -> host  HELLO   protocol, version, sim fingerprint, player name
+##                   TEAM    team                   (lobby: wants to play for this team)
+##                   NAME    player name            (lobby: renamed)
 ##                   INPUT   epoch, tick, local input packet (LocalInput.packet())
 ##                   NEXT    epoch                  (wants the next map after a win)
 ##                   SUM     epoch, tick, checksum  (every Main.SUM_EVERY ticks)
 ##                   PING    msec                   (the host answers PONG with the same msec)
 ##   host -> client  REJECT  reason
+##                   LOBBY   greys, in match, [[peer id, name, team], ...]   (who's in the room)
 ##                   START   epoch, seed, greys, wins0, wins1, match winner, snapshot, paused
 ##                   FRAME   epoch, tick, InputFrame   (confirmed: everyone's real input)
 ##                   SEATS   [[unit id, label, peer id, device], ...]
@@ -20,16 +23,18 @@ extends RefCounted
 ##                   SYNC    how many ticks early this client's inputs arrive, on average
 ##                   PONG    msec from the client's PING
 ## The epoch goes up with every new map, so stale inputs and frames are dropped.
+## Between matches the room sits in the lobby: the host sends LOBBY whenever
+## it changes, START begins a match, and LOBBY with "in match" false ends it.
 
 const Sim = preload("res://scripts/sim/sim.gd")
 const InputFrame = preload("res://scripts/sim/input_frame.gd")
 
 const PORT := 24680
-const PROTOCOL := 3
+const PROTOCOL := 4
 const MAX_CLIENTS := 7
 const HOST_ID := 1
 
-enum Msg { HELLO, REJECT, START, FRAME, INPUT, SEATS, NEXT, SUM, PAUSE, SYNC, PING, PONG }
+enum Msg { HELLO, REJECT, START, FRAME, INPUT, SEATS, NEXT, SUM, PAUSE, SYNC, PING, PONG, LOBBY, TEAM, NAME }
 
 var is_host := false
 ## Testing aid: hold every outgoing packet this long before sending it.
