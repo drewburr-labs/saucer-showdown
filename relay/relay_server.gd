@@ -1,9 +1,10 @@
 extends RefCounted
 ## The relay: lets players behind home routers play without port forwarding.
-## A host opens a room and gets a short code; friends join with the code;
-## the relay then passes each room's packets between its host and clients.
-## It never reads the game's messages, so it doesn't change when the game
-## does, as long as relay_protocol.gd's VERSION stays the same.
+## A host opens a room for its game and gets a short code; friends join with
+## the code; the relay then passes each room's packets between its host and
+## clients, on the same channel and with the same reliability. It never reads
+## the games' messages, so any game can use it and it doesn't change when they
+## do, as long as relay_protocol.gd's VERSION stays the same.
 ##
 ## run_relay.gd runs it (see Dockerfile); tests drive poll() themselves.
 ## It uses a raw ENetConnection rather than ENetMultiplayerPeer, so it sees
@@ -23,14 +24,14 @@ var _next_id := 2 # 1 means "the host" inside a room
 var _ids := {} # ENetPacketPeer -> id
 var _peers := {} # id -> ENetPacketPeer
 var _room_of := {} # id -> room code
-var _rooms := {} # code -> {"host": id, "clients": {id: true}}
+var _rooms := {} # code -> {"game": game id, "host": id, "size": max clients, "clients": {id: true}}
 var _bad_joins := {} # remote address -> [wrong codes, minute they're counted in]
 var _rng := RandomNumberGenerator.new()
 
 
 func start(port: int, bind: String = "*") -> Error:
 	conn = ENetConnection.new()
-	var err := conn.create_host_bound(bind, port, MAX_PEERS, 1)
+	var err := conn.create_host_bound(bind, port, MAX_PEERS, P.MAX_CHANNELS)
 	if err != OK:
 		conn = null
 		return err
@@ -75,9 +76,10 @@ func poll() -> int:
 					_ids.erase(peer)
 					_peers.erase(id)
 			ENetConnection.EVENT_RECEIVE:
+				var flags := peer.get_packet_flags()
 				var packet := peer.get_packet()
 				if _ids.has(peer) and packet.size() >= 1 and packet.size() <= MAX_PACKET:
-					_receive(_ids[peer], packet)
+					_receive(_ids[peer], packet, ev[3], flags)
 		ev = conn.service(0)
 	conn.flush()
 	if _bad_joins.size() > 1000:
@@ -93,23 +95,32 @@ func peer_count() -> int:
 	return _peers.size()
 
 
-func _receive(id: int, p: PackedByteArray) -> void:
+func _receive(id: int, p: PackedByteArray, channel: int, flags: int) -> void:
 	match p[0]:
 		P.HOST:
 			if _room_of.has(id) or not _version_ok(id, p):
 				return
+			var game := _game_id(p, 4)
+			if game == "":
+				_refuse(id, P.Refusal.BAD_REQUEST, "The relay couldn't read that request to open a room.")
+				return
 			if _rooms.size() >= MAX_ROOMS:
-				_refuse(id, "The relay is full right now. Try again in a bit.")
+				_refuse(id, P.Refusal.RELAY_FULL, "The relay is full right now. Try again in a bit.")
 				return
 			var code := _new_code()
-			_rooms[code] = {"host": id, "clients": {}}
+			var size := clampi(p[3], 1, P.MAX_ROOM_CLIENTS)
+			_rooms[code] = {"game": game, "host": id, "size": size, "clients": {}}
 			_room_of[id] = code
-			var out := PackedByteArray([P.ROOM])
+			var out := PackedByteArray([P.ROOM, size])
 			out.append_array(code.to_ascii_buffer())
 			_send(id, out)
-			_log("room %s opened (%d rooms, %d peers)" % [code, _rooms.size(), _peers.size()])
+			_log("%s room %s opened for %d (%d rooms, %d peers)" % [game, code, size + 1, _rooms.size(), _peers.size()])
 		P.JOIN:
-			if _room_of.has(id) or not _version_ok(id, p) or p.size() != 3 + P.CODE_LEN:
+			if _room_of.has(id) or not _version_ok(id, p):
+				return
+			var game := _game_id(p, 3 + P.CODE_LEN)
+			if game == "":
+				_refuse(id, P.Refusal.BAD_REQUEST, "The relay couldn't read that request to join a room.")
 				return
 			var addr: String = (_peers[id] as ENetPacketPeer).get_remote_address()
 			var minute := Time.get_ticks_msec() / 60000
@@ -117,16 +128,16 @@ func _receive(id: int, p: PackedByteArray) -> void:
 			if bad[1] != minute:
 				bad = [0, minute]
 			if bad[0] >= MAX_BAD_JOINS:
-				_refuse(id, "Too many wrong codes. Wait a minute and try again.")
+				_refuse(id, P.Refusal.TOO_MANY_TRIES, "Too many wrong codes. Wait a minute and try again.")
 				return
-			var code := P.normalize_code(p.slice(3).get_string_from_ascii())
-			if not _rooms.has(code):
+			var code := P.normalize_code(p.slice(3, 3 + P.CODE_LEN).get_string_from_ascii())
+			if not _rooms.has(code) or _rooms[code]["game"] != game:
 				_bad_joins[addr] = [bad[0] + 1, minute]
-				_refuse(id, "No game with the code %s. Check it with the host." % code if code != "" else "That isn't a room code.")
+				_refuse(id, P.Refusal.NO_SUCH_ROOM, "No game with the code %s. Check it with the host." % code if code != "" else "That isn't a room code.")
 				return
 			var room: Dictionary = _rooms[code]
-			if room["clients"].size() >= P.MAX_CLIENTS:
-				_refuse(id, "That game is full.")
+			if room["clients"].size() >= room["size"]:
+				_refuse(id, P.Refusal.ROOM_FULL, "That game is full.")
 				return
 			room["clients"][id] = true
 			_room_of[id] = code
@@ -137,19 +148,29 @@ func _receive(id: int, p: PackedByteArray) -> void:
 				return
 			var room: Dictionary = _rooms[_room_of[id]]
 			var payload := p.slice(5)
+			flags &= ENetPacketPeer.FLAG_RELIABLE | ENetPacketPeer.FLAG_UNSEQUENCED | ENetPacketPeer.FLAG_UNRELIABLE_FRAGMENT
 			if room["host"] == id:
-				var out := P.with_id(P.DATA, 1)
+				var out := P.with_id(P.DATA, P.HOST_ID)
 				out.append_array(payload)
 				var to := p.decode_u32(1)
 				if to == 0:
 					for c: int in room["clients"]:
-						_send(c, out)
+						_send(c, out, channel, flags)
 				elif room["clients"].has(to):
-					_send(to, out)
+					_send(to, out, channel, flags)
 			else:
 				var out := P.with_id(P.DATA, id)
 				out.append_array(payload)
-				_send(room["host"], out)
+				_send(room["host"], out, channel, flags)
+
+
+## The game id at the end of a HOST or JOIN packet, or "" if there isn't a
+## valid one.
+func _game_id(p: PackedByteArray, from: int) -> String:
+	if p.size() <= from or p.size() > from + P.MAX_GAME_ID:
+		return ""
+	var game := p.slice(from).get_string_from_ascii()
+	return game if P.valid_game_id(game) and game.length() == p.size() - from else ""
 
 
 func _leave(id: int) -> void:
@@ -164,7 +185,7 @@ func _leave(id: int) -> void:
 			_room_of.erase(c)
 			_peers[c].peer_disconnect_later()
 		_rooms.erase(code)
-		_log("room %s closed (%d rooms, %d peers)" % [code, _rooms.size(), _peers.size() - 1])
+		_log("%s room %s closed (%d rooms, %d peers)" % [room["game"], code, _rooms.size(), _peers.size() - 1])
 	else:
 		room["clients"].erase(id)
 		_send(room["host"], P.with_id(P.PEER_OUT, id))
@@ -174,22 +195,22 @@ func _version_ok(id: int, p: PackedByteArray) -> bool:
 	if p.size() < 3:
 		return false
 	if p.decode_u16(1) != P.VERSION:
-		_refuse(id, "This version of the game can't use the relay. Update the game (F5).")
+		_refuse(id, P.Refusal.OUTDATED, "This game and the relay speak different versions (game %d, relay %d). Update the game." % [p.decode_u16(1), P.VERSION])
 		return false
 	return true
 
 
-func _refuse(id: int, reason: String) -> void:
-	var out := PackedByteArray([P.ERROR])
+func _refuse(id: int, why: P.Refusal, reason: String) -> void:
+	var out := PackedByteArray([P.ERROR, why])
 	out.append_array(reason.to_utf8_buffer())
 	_send(id, out)
 	_peers[id].peer_disconnect_later()
 
 
-func _send(id: int, bytes: PackedByteArray) -> void:
+func _send(id: int, bytes: PackedByteArray, channel: int = 0, flags: int = ENetPacketPeer.FLAG_RELIABLE) -> void:
 	var peer: ENetPacketPeer = _peers.get(id)
 	if peer != null:
-		peer.send(0, bytes, ENetPacketPeer.FLAG_RELIABLE)
+		peer.send(mini(channel, peer.get_channels() - 1), bytes, flags)
 
 
 func _new_code() -> String:

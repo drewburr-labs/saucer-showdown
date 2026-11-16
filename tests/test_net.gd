@@ -10,6 +10,8 @@ extends SceneTree
 const Main = preload("res://scripts/main.gd")
 const Sim = preload("res://scripts/sim/sim.gd")
 const RelayServer = preload("res://relay/relay_server.gd")
+const RelayClient = preload("res://relay/relay_client.gd")
+const RP = preload("res://relay/relay_protocol.gd")
 const LocalInput = preload("res://scripts/input/local_input.gd")
 
 const PORT := 24690
@@ -262,6 +264,64 @@ func _run() -> void:
 	_check(await _until(func() -> bool: return relay_node.relay.room_count() == 0, 2.0), "the relay should drop the room")
 	_report()
 
+	_current = "relay: another game shares it, with its own room size and channels"
+	var at := "127.0.0.1"
+	var rport := PORT + 2
+	var oh := RelayClient.new()
+	var o1 := RelayClient.new()
+	var o2 := RelayClient.new()
+	var o3 := RelayClient.new()
+	var ss := RelayClient.new()
+	var logs := {}
+	for c in [oh, o1, o2, o3, ss]:
+		logs[c] = []
+	var pump := func() -> void:
+		for c: RelayClient in logs:
+			logs[c].append_array(c.poll())
+	_check(oh.host(at, rport, "", 2) == ERR_INVALID_PARAMETER, "an empty game id is turned down before connecting")
+	_check(oh.host(at, rport, "other-game", 2, 3) == OK, "another game should start hosting")
+	_check(await _until(func() -> bool: pump.call(); return oh.room_code != "", 4.0), "and get a room")
+	_check(oh.room_clients == 2 and oh.my_id == RP.HOST_ID, "for the size it asked for (%d), as id 1" % oh.room_clients)
+	ss.join(at, rport, Main.RelayLink.GAME_ID, oh.room_code)
+	_check(await _until(func() -> bool: pump.call(); return _event(logs[ss], "refused") != [], 4.0), "Saucer Showdown can't join another game's room")
+	_check(_event(logs[ss], "refused").slice(1, 2) == [RP.Refusal.NO_SUCH_ROOM], "it's told there's no such room (%s)" % [_event(logs[ss], "refused")])
+	o1.join(at, rport, "other-game", oh.room_code, 3)
+	o2.join(at, rport, "other-game", oh.room_code.to_lower(), 3)
+	_check(await _until(func() -> bool: pump.call(); return o1.is_linked() and o2.is_linked() and logs[oh].filter(func(e: Array) -> bool: return e[0] == "peer_in").size() == 2, 4.0), "two players join it")
+	o3.join(at, rport, "other-game", oh.room_code, 3)
+	_check(await _until(func() -> bool: pump.call(); return _event(logs[o3], "refused") != [], 4.0), "a third doesn't fit")
+	_check(_event(logs[o3], "refused").slice(1, 2) == [RP.Refusal.ROOM_FULL], "because the room is full (%s)" % [_event(logs[o3], "refused")])
+	oh.send(0, PackedByteArray([7, 7]), 2, 0)
+	oh.send(o2.my_id, PackedByteArray([9]), 1, ENetPacketPeer.FLAG_UNSEQUENCED)
+	o1.send(RP.HOST_ID, PackedByteArray([1, 2, 3]), 2)
+	_check(await _until(func() -> bool:
+		pump.call()
+		return _event(logs[o1], "data") != [] and _event(logs[oh], "data") != [] and logs[o2].filter(func(e: Array) -> bool: return e[0] == "data").size() == 2, 4.0), "packets get through")
+	_check(_event(logs[o1], "data") == ["data", RP.HOST_ID, PackedByteArray([7, 7]), 2], "host to everyone, unreliable, on channel 2 (%s)" % [_event(logs[o1], "data")])
+	var o2_got: Array = logs[o2].filter(func(e: Array) -> bool: return e[0] == "data")
+	_check(o2_got.has(["data", RP.HOST_ID, PackedByteArray([9]), 1]), "host to one player, unsequenced, on channel 1 (%s)" % [o2_got])
+	_check(_event(logs[oh], "data") == ["data", o1.my_id, PackedByteArray([1, 2, 3]), 2], "player to host on channel 2 (%s)" % [_event(logs[oh], "data")])
+	oh.close()
+	_check(await _until(func() -> bool: pump.call(); return _event(logs[o1], "closed") != [] and _event(logs[o2], "closed") != [], 4.0), "the host leaving sends both players home")
+	_report()
+
+	_current = "relay: malformed and outdated requests are refused"
+	var bad_id := RelayClient.new()
+	var old := RelayClient.new()
+	var blogs := {bad_id: [], old: []}
+	bad_id.host(at, rport, "x", 2)
+	bad_id._hello = RP.with_version(RP.HOST) + PackedByteArray([2]) + "has space".to_ascii_buffer()
+	old.host(at, rport, "x", 2)
+	old._hello = PackedByteArray([RP.HOST, 1, 0]) # what the first relay protocol sent
+	_check(await _until(func() -> bool:
+		for c: RelayClient in blogs:
+			blogs[c].append_array(c.poll())
+		return _event(blogs[bad_id], "refused") != [] and _event(blogs[old], "refused") != [], 4.0), "both should be refused")
+	_check(_event(blogs[bad_id], "refused").slice(1, 2) == [RP.Refusal.BAD_REQUEST], "a bad game id is a bad request (%s)" % [_event(blogs[bad_id], "refused")])
+	_check(_event(blogs[old], "refused").slice(1, 2) == [RP.Refusal.OUTDATED], "an old client is told it's outdated (%s)" % [_event(blogs[old], "refused")])
+	_check(await _until(func() -> bool: return relay_node.relay.room_count() == 0, 2.0), "no rooms are left open")
+	_report()
+
 	_current = "relay: unreachable relay"
 	var rz := _game(11)
 	rz.relay_address = "127.0.0.1:%d" % (PORT + 3) # nothing listens here
@@ -400,6 +460,14 @@ func _game(p_seed: int, name := "") -> Node:
 	if name != "":
 		g.player_name = name
 	return g
+
+
+## The first event of this kind in `log`, or [].
+func _event(log: Array, kind: String) -> Array:
+	for e: Array in log:
+		if e[0] == kind:
+			return e
+	return []
 
 
 ## Wait (in real time) until `cond` holds, up to `timeout` seconds.
