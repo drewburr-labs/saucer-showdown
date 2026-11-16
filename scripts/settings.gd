@@ -1,9 +1,10 @@
 extends RefCounted
-## The player's settings: name, sound, display and key bindings. Kept in
+## The player's settings: name, sound, display and key and button bindings. Kept in
 ## user://settings.cfg, read on first use and written on every change.
 ## Nothing in the sim reads these.
 
-const PATH := "user://settings.cfg"
+## Where settings are kept; tests point this at a scratch file.
+static var path := "user://settings.cfg"
 
 const RESOLUTIONS := [Vector2i(1280, 720), Vector2i(1600, 900), Vector2i(1920, 1080),
 		Vector2i(2560, 1440), Vector2i(3840, 2160)]
@@ -23,15 +24,26 @@ const DEFAULTS := {
 	"vsync": true,
 	"max_fps": 0,
 	"show_fps": false,
-	"extra_players": false, # more players at this machine can join with Enter or Start
+	"extra_players": false, # more players at this machine can join (Enter, or a gamepad's jump)
 }
 
-## Rebindable keyboard actions, in the order the controls page lists them.
+## Rebindable actions, in the order the controls page lists them.
 const ACTIONS := ["left", "right", "up", "down", "jump", "action", "beam", "swap"]
 const ACTION_NAMES := {
 	"left": "Move left", "right": "Move right", "up": "Move up", "down": "Move down",
 	"jump": "Jump", "action": "Fire / use", "beam": "Tractor beam", "swap": "Switch unit / join",
 }
+## Gamepad triggers are axes, not buttons; bindings name them with these.
+const PAD_LT := 100
+const PAD_RT := 101
+## Short names for gamepad buttons, by JOY_BUTTON_* index.
+const PAD_BUTTON_NAMES := ["A", "B", "X", "Y", "Back", "Guide", "Start", "L3", "R3", "LB", "RB",
+		"D-pad up", "D-pad down", "D-pad left", "D-pad right", "Misc", "Paddle 1", "Paddle 2",
+		"Paddle 3", "Paddle 4", "Touchpad"]
+
+## Bindings per device: keyboards "kb1" and "kb2" bind keycodes; "pad", shared
+## by every gamepad, binds JOY_BUTTON_* indexes or PAD_LT / PAD_RT. The left
+## stick always moves as well, whatever the d-pad is bound to.
 const DEFAULT_KEYS := {
 	"kb1": {
 		"left": [KEY_A], "right": [KEY_D], "up": [KEY_W], "down": [KEY_S],
@@ -42,6 +54,12 @@ const DEFAULT_KEYS := {
 		"jump": [KEY_UP, KEY_KP_0], "action": [KEY_PERIOD, KEY_KP_1], "beam": [KEY_SLASH, KEY_KP_2],
 		"swap": [KEY_ENTER, KEY_KP_ENTER],
 	},
+	"pad": {
+		"left": [JOY_BUTTON_DPAD_LEFT], "right": [JOY_BUTTON_DPAD_RIGHT],
+		"up": [JOY_BUTTON_DPAD_UP], "down": [JOY_BUTTON_DPAD_DOWN],
+		"jump": [JOY_BUTTON_A], "action": [JOY_BUTTON_X, PAD_RT],
+		"beam": [JOY_BUTTON_B, JOY_BUTTON_RIGHT_SHOULDER], "swap": [JOY_BUTTON_Y],
+	},
 }
 
 static var _cfg: ConfigFile
@@ -51,7 +69,7 @@ static var _keys := {} # "device.action" -> keys
 static func _file() -> ConfigFile:
 	if _cfg == null:
 		_cfg = ConfigFile.new()
-		_cfg.load(PATH) # a missing file just means defaults
+		_cfg.load(path) # a missing file just means defaults
 	return _cfg
 
 
@@ -65,8 +83,8 @@ static func set_value(key: String, v: Variant) -> void:
 	_save()
 
 
-## The keys bound to `action` for keyboard `device` ("kb1" or "kb2").
-## Read every tick, so they're cached.
+## What's bound to `action` on `device` ("kb1", "kb2" or "pad"); see
+## DEFAULT_KEYS. Read every tick, so they're cached.
 static func keys(device: String, action: String) -> Array:
 	var id := "%s.%s" % [device, action]
 	if not _keys.has(id):
@@ -88,15 +106,24 @@ static func reset_keys() -> void:
 	_save()
 
 
-static func key_names(list: Array) -> String:
+## The bindings in `list`, for showing: "Space / W", "X / RT".
+static func key_names(device: String, list: Array) -> String:
 	var out := PackedStringArray()
 	for k: int in list:
-		out.append(OS.get_keycode_string(k))
+		out.append(pad_button_name(k) if device == "pad" else OS.get_keycode_string(k))
 	return " / ".join(out)
 
 
+static func pad_button_name(code: int) -> String:
+	if code == PAD_LT:
+		return "LT"
+	if code == PAD_RT:
+		return "RT"
+	return PAD_BUTTON_NAMES[code] if code >= 0 and code < PAD_BUTTON_NAMES.size() else "Button %d" % code
+
+
 static func _save() -> void:
-	_file().save(PATH)
+	_file().save(path)
 
 
 # --- Applying them -------------------------------------------------------

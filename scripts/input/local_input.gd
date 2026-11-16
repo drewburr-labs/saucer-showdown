@@ -106,23 +106,37 @@ func _keys(device: String) -> Dictionary:
 
 func _pad(id: int) -> Dictionary:
 	var s := _blank()
-	if not Input.get_connected_joypads().has(id):
+	if not _connected(id):
 		return s
 	var move := Vector2(Input.get_joy_axis(id, JOY_AXIS_LEFT_X), Input.get_joy_axis(id, JOY_AXIS_LEFT_Y))
 	if move.length() < STICK_DEADZONE:
 		move = Vector2.ZERO
-	move.x += float(Input.is_joy_button_pressed(id, JOY_BUTTON_DPAD_RIGHT)) - float(Input.is_joy_button_pressed(id, JOY_BUTTON_DPAD_LEFT))
-	move.y += float(Input.is_joy_button_pressed(id, JOY_BUTTON_DPAD_DOWN)) - float(Input.is_joy_button_pressed(id, JOY_BUTTON_DPAD_UP))
+	move.x += float(_held(id, "right")) - float(_held(id, "left"))
+	move.y += float(_held(id, "down")) - float(_held(id, "up"))
 	s["move"] = move.limit_length(1.0)
 	var aim := Vector2(Input.get_joy_axis(id, JOY_AXIS_RIGHT_X), Input.get_joy_axis(id, JOY_AXIS_RIGHT_Y))
 	if aim.length() >= AIM_DEADZONE:
 		s["aim"] = aim.normalized()
-	s["jump"] = Input.is_joy_button_pressed(id, JOY_BUTTON_A)
-	s["action"] = Input.is_joy_button_pressed(id, JOY_BUTTON_X) or Input.get_joy_axis(id, JOY_AXIS_TRIGGER_RIGHT) > 0.5
-	s["beam"] = Input.is_joy_button_pressed(id, JOY_BUTTON_B) or Input.is_joy_button_pressed(id, JOY_BUTTON_RIGHT_SHOULDER)
-	s["swap"] = Input.is_joy_button_pressed(id, JOY_BUTTON_Y)
+	for k in ["jump", "action", "beam", "swap"]:
+		s[k] = _held(id, k)
 	s["join"] = s["jump"] # Start is pause, handled by the menus
 	return s
+
+
+func _connected(id: int) -> bool:
+	return Input.get_connected_joypads().has(id)
+
+
+## True if anything bound to `action` in Settings is held on gamepad `id`.
+func _held(id: int, action: String) -> bool:
+	for b: int in Settings.keys("pad", action):
+		if b == Settings.PAD_LT or b == Settings.PAD_RT:
+			var axis := JOY_AXIS_TRIGGER_LEFT if b == Settings.PAD_LT else JOY_AXIS_TRIGGER_RIGHT
+			if Input.get_joy_axis(id, axis) > 0.5:
+				return true
+		elif Input.is_joy_button_pressed(id, b):
+			return true
+	return false
 
 
 func _any(keys: Array) -> bool:

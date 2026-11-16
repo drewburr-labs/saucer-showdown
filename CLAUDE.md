@@ -27,6 +27,7 @@ godot --headless --path . --import
 godot --headless --path . --script tests/test_sim.gd
 godot --headless --path . --script tests/test_updater.gd
 godot --headless --path . --script tests/test_net.gd
+godot --headless --path . --script tests/test_input.gd
 ```
 
 Visual checks (this machine has no display, so wrap screenshots in `xvfb-run`):

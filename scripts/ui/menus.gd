@@ -208,7 +208,7 @@ func _refresh() -> void:
 			var status: String = up.status_text() if up != null else ""
 			_version.text = (up.version if up != null else "") + ("   ·   " + status if status != "" else "")
 		"local":
-			var who := "Player 2 joins with %s and gamepads with A, at any time." % _p2_key() \
+			var who := "Player 2 joins with %s and gamepads with %s, at any time." % [_p2_key(), _pad_join()] \
 					if Settings.value("extra_players") else "Any keyboard or gamepad plays as you."
 			_local_blurb.text = "You're Player 1 on %s. %s Bots fill every other seat. Best of 3 maps." % [
 					Cfg.TEAM_NAMES[0], who]
@@ -224,7 +224,7 @@ func _refresh() -> void:
 	for b in _p2_btns:
 		b.set_pressed_no_signal(on)
 		b.text = "2nd player: On" if on else "2nd player: Off"
-		b.tooltip_text = ("Player 2 joins with %s, gamepads with A. Click to turn off." % _p2_key()) if on \
+		b.tooltip_text = ("Player 2 joins with %s, gamepads with %s. Click to turn off." % [_p2_key(), _pad_join()]) if on \
 				else "Only you play at this machine; every keyboard and gamepad controls you. Click to let a 2nd player join."
 	var show_toast: bool = game.notice_t > 0.0 and game.notice != ""
 	_toast.visible = show_toast
@@ -568,6 +568,11 @@ func _p2_toggle() -> Button:
 
 func _p2_key() -> String:
 	return OS.get_keycode_string(Settings.keys("kb2", "swap")[0])
+
+
+## A gamepad joins with its jump button.
+func _pad_join() -> String:
+	return Settings.pad_button_name(Settings.keys("pad", "jump")[0])
 
 
 func _player_row(e: Dictionary, mine: bool, is_host: bool, team: int) -> Control:

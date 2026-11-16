@@ -52,7 +52,7 @@ A match is best of 3 maps.
 - **Saucer damage:** a saucer takes 3 hits to bring down. It smokes after one and sparks after two; the bar beside its lives shows what's left. A fresh saucer is back to full.
 - **Saucer wrecks:** a downed saucer stays where it falls as a platform until its Overlord respawns.
 
-Other keys: Esc (or Start on a gamepad) opens the in-game menu (resume, restart, settings, back to the lobby or home), F1 controls, F3 hand Player 1's seat to a bot and watch (local games), F5 check for an update (and install it when one is offered). Keyboard keys can be changed in Settings.
+Other keys: Esc (or Start on a gamepad) opens the in-game menu (resume, restart, settings, back to the lobby or home), F1 controls, F3 hand Player 1's seat to a bot and watch (local games), F5 check for an update (and install it when one is offered). Keyboard keys and gamepad buttons can be changed in Settings (every gamepad shares one set; the left stick always moves, and Start always opens the menu).
 
 ## Play online
 
@@ -107,6 +107,7 @@ tests/
   test_sim.gd          headless tests for every rule and win condition
   test_updater.gd      headless tests for version ordering and asset choice
   test_net.gd          host and clients over loopback (and with fake lag), checked tick by tick; the lobby
+  test_input.gd        gamepad bindings, read and rebound on the settings page
   bot_stats.gd         balance probe: how bot-only matches end
 relay/                 the relay server and its Docker image (see relay/README.md)
   relay_server.gd      rooms, codes, forwarding
@@ -180,6 +181,10 @@ godot --headless --path . --script tests/test_updater.gd
 
 ```bash
 godot --headless --path . --script tests/test_net.gd
+```
+
+```bash
+godot --headless --path . --script tests/test_input.gd
 ```
 
 ```bash

@@ -17,8 +17,12 @@ var _res_list: Array = []
 var _vsync: CheckBox
 var _fps: OptionButton
 var _show_fps: CheckBox
+const DEVICES := ["kb1", "kb2", "pad"]
+const NO_INPUT := -1 # what _captured() returns for an event that binds nothing
+const CANCEL := -2
+
 var _key_btns := {} # "device.action" -> Button
-var _rebinding := "" # "device.action" waiting for a key, or ""
+var _rebinding := "" # "device.action" waiting for a key or button, or ""
 var _bind_note: Label
 
 
@@ -146,20 +150,20 @@ func _controls_tab() -> Control:
 	var box := UI.column(10)
 	box.name = "Controls"
 	var grid := GridContainer.new()
-	grid.columns = 3
+	grid.columns = 1 + DEVICES.size()
 	grid.add_theme_constant_override("h_separation", 12)
 	grid.add_theme_constant_override("v_separation", 6)
 	box.add_child(grid)
 	grid.add_child(UI.label("", 15))
-	for head: String in ["Player 1 keyboard", "Player 2 keyboard"]:
+	for head: String in ["Player 1 keyboard", "Player 2 keyboard", "Gamepad"]:
 		var l := UI.label(head, 15, UI.GOLD)
 		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		grid.add_child(l)
 	for action: String in Settings.ACTIONS:
 		var l := UI.label(Settings.ACTION_NAMES[action], 16, UI.DIM)
-		l.custom_minimum_size = Vector2(170, 0)
+		l.custom_minimum_size = Vector2(150, 0)
 		grid.add_child(l)
-		for device: String in ["kb1", "kb2"]:
+		for device: String in DEVICES:
 			var id := "%s.%s" % [device, action]
 			var b := UI.button("")
 			b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -170,7 +174,7 @@ func _controls_tab() -> Control:
 			_key_btns[id] = b
 	_bind_note = UI.label("", 15, Color(1, 1, 1, 0.5), true)
 	box.add_child(_bind_note)
-	box.add_child(UI.label("Gamepad: stick or d-pad move · A jump / join · X fire / use · B beam · Y switch unit · Start menu", 15, Color(1, 1, 1, 0.5), true))
+	box.add_child(UI.label("All gamepads share these. Left stick moves, right stick aims, Jump joins, Start opens the menu.", 15, Color(1, 1, 1, 0.5), true))
 	var reset := UI.button("Reset to defaults", func() -> void:
 		Settings.reset_keys()
 		_rebinding = ""
@@ -183,9 +187,14 @@ func _controls_tab() -> Control:
 func _refresh_keys() -> void:
 	for id: String in _key_btns:
 		var parts := id.split(".")
-		_key_btns[id].text = "Press a key…" if id == _rebinding else Settings.key_names(Settings.keys(parts[0], parts[1]))
-	_bind_note.text = "Press the new key, or Esc to cancel." if _rebinding != "" \
-			else "Click a key to change it."
+		var waiting := "Press a button…" if parts[0] == "pad" else "Press a key…"
+		_key_btns[id].text = waiting if id == _rebinding else Settings.key_names(parts[0], Settings.keys(parts[0], parts[1]))
+	if _rebinding == "":
+		_bind_note.text = "Pick a key or button to change it."
+	elif _rebinding.begins_with("pad."):
+		_bind_note.text = "Press the new gamepad button or trigger, or Start or Esc to cancel."
+	else:
+		_bind_note.text = "Press the new key, or Esc or Start to cancel."
 
 
 func _start_rebind(id: String) -> void:
@@ -196,15 +205,44 @@ func _start_rebind(id: String) -> void:
 func _input(event: InputEvent) -> void:
 	if _rebinding == "" or not is_visible_in_tree():
 		return
-	var key := event as InputEventKey
-	if key == null or not key.pressed or key.echo:
+	if not (event is InputEventKey or event is InputEventJoypadButton or event is InputEventJoypadMotion):
 		return
+	# While waiting, keys and gamepads only answer this: no menu moves, B or Esc.
 	get_viewport().set_input_as_handled()
-	var code := key.physical_keycode if key.physical_keycode != KEY_NONE else key.keycode
-	if code != KEY_ESCAPE:
-		var parts := _rebinding.split(".")
+	var parts := _rebinding.split(".")
+	var code := _captured(event, parts[0] == "pad")
+	if code == NO_INPUT:
+		return
+	if code != CANCEL:
 		Settings.set_keys(parts[0], parts[1], [code])
 	var was := _rebinding
 	_rebinding = ""
 	_refresh_keys()
 	_key_btns[was].grab_focus()
+
+
+## The binding `event` makes for a keyboard cell or, with `pad`, a gamepad
+## cell; or CANCEL (Esc, Start), or NO_INPUT for anything else.
+static func _captured(event: InputEvent, pad: bool) -> int:
+	var key := event as InputEventKey
+	if key != null:
+		if not key.pressed or key.echo:
+			return NO_INPUT
+		var code := key.physical_keycode if key.physical_keycode != KEY_NONE else key.keycode
+		if code == KEY_ESCAPE:
+			return CANCEL
+		return NO_INPUT if pad else code
+	var button := event as InputEventJoypadButton
+	if button != null:
+		if not button.pressed:
+			return NO_INPUT
+		if button.button_index == JOY_BUTTON_START:
+			return CANCEL
+		return button.button_index if pad else NO_INPUT
+	var motion := event as InputEventJoypadMotion
+	if motion != null and pad and motion.axis_value > 0.5:
+		if motion.axis == JOY_AXIS_TRIGGER_LEFT:
+			return Settings.PAD_LT
+		if motion.axis == JOY_AXIS_TRIGGER_RIGHT:
+			return Settings.PAD_RT
+	return NO_INPUT
