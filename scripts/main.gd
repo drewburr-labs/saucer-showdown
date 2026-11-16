@@ -2,12 +2,17 @@ extends Node2D
 ## Game shell. Offline and online play run the same loop:
 ##  1. Every machine samples its local devices into one input packet per tick
 ##     and hands it to the host. Offline, this machine is the host.
-##  2. The host applies seat changes, packs everyone's input into one
-##     InputFrame per tick (bots drive the empty seats) and sends it out.
-##  3. Every machine steps its sim only on those frames, so they all run the
-##     identical match. Restarts, pause and the score are the host's call.
-## Input is sampled `input_delay` ticks ahead of the sim: 1 offline, which is
-## no delay at all, and ONLINE_DELAY online, to cover the round trip.
+##  2. The host applies seat changes and, once it has everyone's input for a
+##     tick, packs it into a confirmed InputFrame and sends it to everyone.
+##  3. Every machine runs its sim at the "present", ahead of the last
+##     confirmed frame. For ticks not yet confirmed it predicts: its own input
+##     is known, everyone else is assumed to still be doing what they last did.
+##     When a confirmed frame disagrees with a prediction, it rewinds to the
+##     saved state of that tick and replays up to the present (rollback).
+## So all machines end up running the identical match, and nobody waits for
+## the network unless the present gets MAX_AHEAD ticks past the confirmed
+## frames. Offline, every frame is confirmed at once and nothing is predicted.
+## Restarts, pause and the score are the host's call.
 
 const Cfg = preload("res://scripts/sim/config.gd")
 const E = preload("res://scripts/sim/entities.gd")
@@ -24,9 +29,11 @@ enum Role { OFFLINE, HOST, CLIENT }
 const Msg = NetPeer.Msg
 
 const LOCAL := NetPeer.HOST_ID # the host's own peer id, online or off
-const ONLINE_DELAY := 4 # ticks (~67 ms) between sampling input and simulating it
+const ONLINE_DELAY := 2 # ticks (~33 ms) of input delay online; it makes rollbacks shallower
+const MAX_AHEAD := 12 # ticks (200 ms) the present may run past the confirmed frames
 const SUM_EVERY := 60 # clients report a checksum this often
-const MAX_CATCHUP := 4 # frames a client may step in one physics tick
+const SYNC_EVERY := 30 # host tells clients how early their inputs arrive this often
+const TARGET_LEAD := 1.0 # ticks early a client's input should reach the host
 const WAIT_NOTICE := 30 # ticks stalled before the HUD says so
 
 var sim: Sim
@@ -34,27 +41,28 @@ var humans: Dictionary = {} # host: "peer:device" -> {"team": int, "idx": int}; 
 var greys_per_team := 1 # 1 = the 2v2 prototype, 3 = full 4v4
 var map_wins := [0, 0]
 var match_winner := -1
+var win_confirmed := false # sim.winner is set and every frame up to it is confirmed
 var paused := false
 var show_help := true
 var updater: Updater
 
 var role := Role.OFFLINE
 var net: NetPeer
-var input_delay := 1
+var input_delay := 0
 var fingerprint := 0 # proves to the host that we run the same sim; 0 until needed
+var fake_lag_ms := 0 # testing aid: delay every packet we send (--lag=N)
 var net_status := "" # one line for the HUD
 var you := "" # this machine's players, e.g. "P2"
 var notice := "" # a passing message for the HUD
 var notice_t := 0.0
-var waiting_t := 0 # ticks the sim has been held up waiting for a frame
+var waiting_t := 0 # ticks the present has been held up by the network
+var rollbacks := 0 # times the present was rewound and replayed
 var resyncs := 0 # host: clients put back in step after a checksum mismatch
-var record_sums := false # tests: keep every tick's checksum in sums_log
+var record_sums := false # tests: keep every final tick's checksum in sums_log
 var sums_log := {} # "epoch:tick" -> checksum
 
 var _epoch := 0
 var _seed := 0
-var _frames := {} # tick -> InputFrame waiting to be stepped
-var _next_input := 0 # next tick to sample local input for
 var _win_ticks := 0
 var _next_sent := false
 var _help_ticks := 480 # the controls overlay hides itself after 8 s
@@ -65,9 +73,20 @@ var _menu: OnlineMenu
 var _host_port := NetPeer.PORT
 var _join_addr := ""
 
+# The timeline, on every machine. The present is sim.tick.
+var _cframes := {} # tick -> confirmed frame
+var _confirmed := 0 # frames for every tick before this are confirmed
+var _verified := 0 # every tick before this was stepped with its confirmed frame, so the state here is final
+var _used := {} # tick -> frame the present was stepped with
+var _states := {} # tick -> sim state before stepping that tick, for ticks not yet verified
+var _local := {} # tick -> this machine's input packet for it
+var _next_input := 0 # next tick to sample local input for
+var _last_cframe := PackedByteArray() # newest confirmed frame: the basis of predictions
+var _my_seats: Array = [] # [unit id, device index] for players at this machine
+var _shown: Array = [] # [tick, type, team, pos] effects already shown, so replays don't repeat them
+
 # Host only
-var _peers := {} # peer id -> {"greeted": bool, "from": first tick it owes input for, "inputs": {tick: packet}}
-var _next_frame := 0
+var _peers := {} # peer id -> {"greeted", "from" (first tick it owes input for), "inputs" {tick: packet}, "lead", "leads"}
 var _prev_buttons := {} # "peer:device" -> button byte in the last frame
 var _player_no := {} # "peer:device" -> n, shown as "Pn"
 var _next_player := 1
@@ -75,6 +94,7 @@ var _sums := {} # tick -> checksum, to check clients against
 
 # Client only
 var _started := false
+var _drift := 0 # ticks to gain (+) or lose (-) to keep our inputs arriving on time
 
 
 func _ready() -> void:
@@ -105,6 +125,8 @@ func _read_cmdline() -> void:
 			_join_addr = a.trim_prefix("--join=")
 		elif a.begins_with("--port="):
 			_host_port = int(a.trim_prefix("--port="))
+		elif a.begins_with("--lag="):
+			fake_lag_ms = int(a.trim_prefix("--lag="))
 	if host_now:
 		host(_host_port)
 	elif _join_addr != "":
@@ -119,6 +141,7 @@ func host(port: int = NetPeer.PORT) -> String:
 		leave()
 	_ensure_fingerprint()
 	net = NetPeer.new()
+	net.lag_ms = fake_lag_ms
 	var err := net.host(port)
 	if err != OK:
 		net = null
@@ -144,6 +167,7 @@ func join(address: String) -> String:
 		return "Type the host's address first."
 	_ensure_fingerprint()
 	net = NetPeer.new()
+	net.lag_ms = fake_lag_ms
 	var err := net.join(host_name, port)
 	if err != OK:
 		net = null
@@ -168,7 +192,7 @@ func _go_offline(reason: String) -> void:
 		net = null
 	var was_client := role == Role.CLIENT
 	role = Role.OFFLINE
-	input_delay = 1
+	input_delay = 0
 	net_status = ""
 	_started = false
 	for id: int in _peers.keys():
@@ -183,6 +207,8 @@ func _go_offline(reason: String) -> void:
 		_new_match()
 	else:
 		_refresh_labels()
+		# Inputs sampled ahead for the online delay still get used; the
+		# present simply catches up with them.
 
 
 func _ensure_fingerprint() -> void:
@@ -196,7 +222,7 @@ func _host_address() -> String:
 	return a if _host_port == NetPeer.PORT else "%s:%d" % [a, _host_port]
 
 
-# --- Matches (host and offline) -----------------------------------------
+# --- Matches -------------------------------------------------------------
 
 func _new_match() -> void:
 	map_wins = [0, 0]
@@ -210,10 +236,10 @@ func _new_map() -> void:
 	_begin(_seed, greys_per_team, PackedByteArray())
 	for id: int in _peers:
 		if id != LOCAL and _peers[id]["greeted"]:
-			net.send(id, _start_msg(false))
+			_send_start(id)
 
 
-## Set up a map from its seed, or from a host's snapshot when joining late.
+## Set up a map from its seed, or from the host's snapshot when joining late.
 func _begin(p_seed: int, greys: int, snapshot: PackedByteArray) -> void:
 	if sim != null:
 		sim.dispose()
@@ -221,37 +247,48 @@ func _begin(p_seed: int, greys: int, snapshot: PackedByteArray) -> void:
 	sim = Sim.new(p_seed, greys)
 	if not snapshot.is_empty():
 		sim.load_state(snapshot)
-	_frames.clear()
+	_cframes.clear()
+	_used.clear()
+	_states.clear()
+	_local.clear()
+	_shown.clear()
+	_confirmed = sim.tick
+	_verified = sim.tick
 	_next_input = sim.tick
+	win_confirmed = false
 	_win_ticks = 0
 	_next_sent = false
 	waiting_t = 0
+	_drift = 0
 	_view.sim = sim
-	if role == Role.CLIENT:
-		return
-	_next_frame = sim.tick
-	_sums.clear()
-	for id: int in _peers:
-		_peers[id]["inputs"].clear()
-		_peers[id]["from"] = sim.tick
-	# Re-seat humans; a smaller team may not have their old slot.
-	var seats := humans.duplicate()
-	humans.clear()
-	for key: String in seats:
-		_seat(key, seats[key]["team"], seats[key]["idx"])
-	_refresh_labels()
+	if role != Role.CLIENT:
+		_sums.clear()
+		for id: int in _peers:
+			_peers[id]["inputs"].clear()
+			_peers[id]["from"] = sim.tick
+		# Re-seat humans; a smaller team may not have their old slot.
+		var seats := humans.duplicate()
+		humans.clear()
+		for key: String in seats:
+			_seat(key, seats[key]["team"], seats[key]["idx"])
+		_refresh_labels()
+	_last_cframe = _idle_frame()
 
 
-func _advance() -> void:
+## Host: send `peer` the match as it stands at the last final tick, plus the
+## confirmed frames since, so it can join or get back in step.
+func _send_start(peer: int) -> void:
+	var state: PackedByteArray = _states[_verified] if _verified < sim.tick else sim.save_state()
+	net.send(peer, [Msg.START, _epoch, _seed, greys_per_team, map_wins[0], map_wins[1], match_winner, state, paused])
+	for t in range(_verified, _confirmed):
+		net.send(peer, [Msg.FRAME, _epoch, t, _cframes[t]])
+
+
+func _advance_map() -> void:
 	if match_winner >= 0:
 		_new_match()
 	else:
 		_new_map()
-
-
-func _start_msg(with_state: bool) -> Array:
-	return [Msg.START, _epoch, _seed, greys_per_team, map_wins[0], map_wins[1], match_winner,
-			sim.save_state() if with_state else PackedByteArray(), paused]
 
 
 # --- The tick ------------------------------------------------------------
@@ -265,50 +302,140 @@ func _physics_process(_delta: float) -> void:
 	notice_t = maxf(0.0, notice_t - Cfg.TICK)
 	if net != null:
 		_net_events()
-	if role == Role.CLIENT:
-		_client_tick()
-	else:
-		_host_tick()
-	_step_frames()
+	if role != Role.CLIENT:
+		_assemble()
+	_reconcile()
+
+	# Normally one tick per physics tick; a client that runs early or late
+	# against the host drops or adds one every other tick until it's on time.
+	var steps := 1
+	if _drift != 0 and Engine.get_physics_frames() % 2 == 0:
+		steps = 2 if _drift > 0 else 0
+		_drift -= signi(_drift)
+	var stalled := false
+	for i in steps:
+		if not _advance():
+			stalled = sim.tick - _confirmed >= MAX_AHEAD
+			break
+	waiting_t = waiting_t + 1 if stalled and role != Role.OFFLINE else 0
+
+	_check_win()
+	if role == Role.HOST and Engine.get_physics_frames() % SYNC_EVERY == 0:
+		_send_sync()
 	if net != null:
 		net.flush()
 	_update_status()
 
 
-func _host_tick() -> void:
-	if sim.winner >= 0:
-		_win_ticks += 1
-		# Ignore the first second so a held key can't skip the banner.
-		if _win_ticks > 60 and _wants_next():
-			_advance()
-		return
-	if paused or (role == Role.OFFLINE and _menu.is_open()):
-		return
-	if _next_input < _next_frame + input_delay:
-		_peers[LOCAL]["inputs"][_next_input] = _local_packet()
+## Move the present on one tick. Returns false if it can't right now.
+func _advance() -> bool:
+	if paused or (role == Role.OFFLINE and _menu.is_open()) or sim.winner >= 0:
+		return false
+	if role == Role.CLIENT and not _started:
+		return false
+	if sim.tick - _confirmed >= MAX_AHEAD:
+		return false # too far past what's confirmed: wait for the network
+	while _next_input <= sim.tick + input_delay:
+		var packet := _local_packet()
+		_local[_next_input] = packet
+		if role == Role.CLIENT:
+			net.send(LOCAL, [Msg.INPUT, _epoch, _next_input, packet])
+		else:
+			_peers[LOCAL]["inputs"][_next_input] = packet
 		_next_input += 1
-	_assemble()
+	if role != Role.CLIENT:
+		_assemble()
+		_reconcile()
+		if sim.winner >= 0:
+			return false
+	var t := sim.tick
+	var confirmed := _cframes.has(t)
+	var f: PackedByteArray = _cframes[t] if confirmed else _predict(t)
+	var final := confirmed and t == _verified
+	if not final:
+		_states[t] = sim.save_state()
+	_used[t] = f
+	sim.step_frame(f)
+	_show_events(t, sim.events, false)
+	if final:
+		_verify_to(t + 1)
+	return true
 
 
-func _client_tick() -> void:
-	if not _started:
+## Our best guess at tick t: everyone keeps doing what they last did, except
+## the players at this machine, whose input we already have.
+func _predict(t: int) -> PackedByteArray:
+	var f := _last_cframe.duplicate()
+	var packet = _local.get(t)
+	if packet == null:
+		return f
+	for s: Array in _my_seats:
+		var dst: int = s[0] * InputFrame.UNIT_BYTES
+		var src: int = s[1] * InputFrame.UNIT_BYTES
+		if dst + 4 >= f.size():
+			continue
+		for k in 4:
+			f[dst + k] = packet[src + k]
+		f[dst + 4] = packet[src + 4] & InputFrame.PLAY_BUTTONS
+	return f
+
+
+## Check the present against newly confirmed frames; rewind and replay from
+## the first tick that was predicted wrong.
+func _reconcile() -> void:
+	var v := _verified
+	var limit := mini(_confirmed, sim.tick)
+	while v < limit and _used[v] == _cframes[v]:
+		v += 1
+	if v >= limit:
+		if v > _verified:
+			_verify_to(v)
 		return
-	if sim.winner >= 0:
-		_win_ticks += 1
-		if _win_ticks > 60 and not _next_sent and _wants_next():
-			net.send(LOCAL, [Msg.NEXT, _epoch])
-			_next_sent = true
-		return
-	if _next_input < sim.tick + input_delay:
-		net.send(LOCAL, [Msg.INPUT, _epoch, _next_input, _local_packet()])
-		_next_input += 1
+	rollbacks += 1
+	var present := sim.tick
+	sim.load_state(_states[v])
+	for k in range(v, present):
+		var f: PackedByteArray = _cframes[k] if _cframes.has(k) else _predict(k)
+		_states[k] = sim.save_state()
+		_used[k] = f
+		sim.step_frame(f)
+		_show_events(k, sim.events, true)
+		if sim.winner >= 0:
+			break # the replay ended the map sooner than the prediction did
+	for k: int in _states.keys():
+		if k >= sim.tick:
+			_states.erase(k)
+			_used.erase(k)
+	_verify_to(mini(_confirmed, sim.tick))
 
 
-## Host: turn every tick that all players have sent input for into a frame.
+## Ticks up to `v` are final: report their checksums and forget their history.
+func _verify_to(v: int) -> void:
+	for m in range(_verified + 1, v + 1):
+		var report := m % SUM_EVERY == 0 and role != Role.OFFLINE
+		if report or record_sums:
+			var s := Sim.hash_state(_states[m]) if m < sim.tick else sim.checksum()
+			if record_sums:
+				sums_log["%d:%d" % [_epoch, m]] = s
+			if report and role == Role.HOST:
+				_sums[m] = s
+				_sums.erase(m - SUM_EVERY * 20)
+			elif report:
+				net.send(LOCAL, [Msg.SUM, _epoch, m, s])
+	for k in range(_verified, v):
+		_states.erase(k)
+		_used.erase(k)
+		_cframes.erase(k)
+		_local.erase(k)
+	_verified = v
+
+
+## Host: turn every tick that all players have sent input for into a
+## confirmed frame.
 func _assemble() -> void:
 	var seats_changed := false
-	while _all_inputs_in(_next_frame):
-		var t := _next_frame
+	while _all_inputs_in(_confirmed):
+		var t := _confirmed
 		var packets := {}
 		for id: int in _peers:
 			var p: Dictionary = _peers[id]
@@ -342,10 +469,9 @@ func _assemble() -> void:
 			for k in 4:
 				frame[dst + k] = packet[src + k]
 			frame[dst + 4] = packet[src + 4] & InputFrame.PLAY_BUTTONS
-		_frames[t] = frame
+		_confirm(t, frame)
 		if net != null:
 			net.send(0, [Msg.FRAME, _epoch, t, frame])
-		_next_frame += 1
 	if seats_changed:
 		_refresh_labels()
 
@@ -358,33 +484,60 @@ func _all_inputs_in(t: int) -> bool:
 	return true
 
 
-func _step_frames() -> void:
-	var cap := MAX_CATCHUP if role == Role.CLIENT else 1 << 30
-	var n := 0
-	while n < cap and sim.winner < 0 and _frames.has(sim.tick):
-		var t := sim.tick
-		sim.step_frame(_frames[t])
-		_frames.erase(t)
-		n += 1
-		_view.add_events(sim.events)
-		var report := sim.tick % SUM_EVERY == 0 and role != Role.OFFLINE
-		if report or record_sums:
-			var s := sim.checksum()
-			if record_sums:
-				sums_log["%d:%d" % [_epoch, sim.tick]] = s
-			if report and role == Role.HOST:
-				_sums[sim.tick] = s
-				_sums.erase(sim.tick - SUM_EVERY * 20)
-			elif report:
-				net.send(LOCAL, [Msg.SUM, _epoch, sim.tick, s])
-		if sim.winner >= 0:
-			map_wins[sim.winner] += 1
-			if map_wins[sim.winner] >= Cfg.MAPS_TO_WIN:
-				match_winner = sim.winner
-	if n > 0 or sim.winner >= 0 or paused or role == Role.OFFLINE:
-		waiting_t = 0
+func _confirm(t: int, frame: PackedByteArray) -> void:
+	_cframes[t] = frame
+	_confirmed = t + 1
+	_last_cframe = frame
+
+
+## A frame where the seated humans stand still and bots drive the rest.
+func _idle_frame() -> PackedByteArray:
+	var f := InputFrame.all_bots(sim.units.size())
+	for id: int in _view.labels:
+		if id < sim.units.size():
+			f[id * InputFrame.UNIT_BYTES + 4] = 0
+	return f
+
+
+## Hand a tick's events to the view. A replayed tick skips the effects it
+## already showed the first time round (give or take a few ticks and pixels).
+func _show_events(t: int, events: Array, replay: bool) -> void:
+	var fresh := []
+	for ev: Dictionary in events:
+		var seen := false
+		if replay:
+			for s: Array in _shown:
+				if s[1] == ev["type"] and s[2] == ev.get("team", -1) and absi(s[0] - t) <= 4 \
+						and s[3].distance_to(ev["pos"]) < 48.0:
+					seen = true
+					break
+		if not seen:
+			fresh.append(ev)
+			_shown.append([t, ev["type"], ev.get("team", -1), ev["pos"]])
+	if not fresh.is_empty():
+		_view.add_events(fresh)
+	while not _shown.is_empty() and _shown[0][0] < _verified - 10:
+		_shown.pop_front()
+
+
+func _check_win() -> void:
+	if sim.winner < 0 or _verified < sim.tick:
+		return
+	if not win_confirmed:
+		win_confirmed = true
+		map_wins[sim.winner] += 1
+		if map_wins[sim.winner] >= Cfg.MAPS_TO_WIN:
+			match_winner = sim.winner
+	_win_ticks += 1
+	# Ignore the first second so a held key can't skip the banner.
+	if _win_ticks <= 60 or not _wants_next():
+		return
+	if role == Role.CLIENT:
+		if not _next_sent:
+			net.send(LOCAL, [Msg.NEXT, _epoch])
+			_next_sent = true
 	else:
-		waiting_t += 1
+		_advance_map()
 
 
 func _local_packet() -> PackedByteArray:
@@ -398,6 +551,17 @@ func _wants_next() -> bool:
 		if _input.pressed(device, "join") or _input.pressed(device, "jump"):
 			return true
 	return false
+
+
+## Host: tell each client how many ticks early its inputs have been arriving.
+func _send_sync() -> void:
+	for id: int in _peers:
+		var p: Dictionary = _peers[id]
+		if id == LOCAL or not p["greeted"] or p["leads"] == 0:
+			continue
+		net.send(id, [Msg.SYNC, p["lead"] / p["leads"]])
+		p["lead"] = 0.0
+		p["leads"] = 0
 
 
 # --- Network messages ----------------------------------------------------
@@ -442,8 +606,8 @@ func _host_msg(id: int, m: Array) -> void:
 				net.send(id, [Msg.REJECT, "The host runs %s and you run %s. Everyone needs the same version." % [updater.version, m[2]]])
 				return
 			p["greeted"] = true
-			p["from"] = _next_frame
-			net.send(id, _start_msg(true))
+			p["from"] = _confirmed
+			_send_start(id)
 			_join(_key(id, "kb1"))
 			_refresh_labels()
 			_say("%s joined." % _labels_of(id) if _labels_of(id) != "" else "A player joined to watch.")
@@ -451,13 +615,16 @@ func _host_msg(id: int, m: Array) -> void:
 			if not p["greeted"] or not NetPeer.valid(m, [TYPE_INT, TYPE_INT, TYPE_PACKED_BYTE_ARRAY]):
 				return
 			var t: int = m[2]
-			if m[1] == _epoch and t >= maxi(_next_frame, p["from"]) and t < _next_frame + 600 \
-					and m[3].size() == LocalInput.PACKET_BYTES and not p["inputs"].has(t):
+			if m[1] != _epoch or m[3].size() != LocalInput.PACKET_BYTES:
+				return
+			if t >= maxi(_confirmed, p["from"]) and t < _confirmed + 600 and not p["inputs"].has(t):
 				p["inputs"][t] = m[3]
+				p["lead"] += float(t - sim.tick)
+				p["leads"] += 1
 		Msg.NEXT:
 			if p["greeted"] and NetPeer.valid(m, [TYPE_INT]) and m[1] == _epoch \
-					and sim.winner >= 0 and _win_ticks > 60:
-				_advance()
+					and win_confirmed and _win_ticks > 60:
+				_advance_map()
 		Msg.SUM:
 			if not p["greeted"] or not NetPeer.valid(m, [TYPE_INT, TYPE_INT, TYPE_INT]):
 				return
@@ -465,7 +632,7 @@ func _host_msg(id: int, m: Array) -> void:
 				# Out of step: send the client the current state to carry on from.
 				resyncs += 1
 				push_warning("peer %d desynced at tick %d; resyncing" % [id, m[2]])
-				net.send(id, _start_msg(true))
+				_send_start(id)
 
 
 func _client_msg(m: Array) -> void:
@@ -489,19 +656,23 @@ func _client_msg(m: Array) -> void:
 			_started = true
 		Msg.FRAME:
 			if NetPeer.valid(m, [TYPE_INT, TYPE_INT, TYPE_PACKED_BYTE_ARRAY]) and _started \
-					and m[1] == _epoch and m[2] >= sim.tick \
+					and m[1] == _epoch and m[2] == _confirmed \
 					and m[3].size() == sim.units.size() * InputFrame.UNIT_BYTES:
-				_frames[m[2]] = m[3]
+				_confirm(m[2], m[3])
 		Msg.SEATS:
 			if NetPeer.valid(m, [TYPE_ARRAY]):
 				_apply_seats(m[1])
 		Msg.PAUSE:
 			if NetPeer.valid(m, [TYPE_BOOL]):
 				paused = m[1]
+		Msg.SYNC:
+			if NetPeer.valid(m, [TYPE_FLOAT]) and _started:
+				# Close half the gap each time, so the correction can't overshoot.
+				_drift = clampi(roundi((TARGET_LEAD - m[1]) * 0.5), -15, 15)
 
 
 func _peer_state(greeted: bool) -> Dictionary:
-	return {"greeted": greeted, "from": _next_frame, "inputs": {}}
+	return {"greeted": greeted, "from": _confirmed, "inputs": {}, "lead": 0.0, "leads": 0}
 
 
 func _drop_peer(id: int) -> void:
@@ -554,7 +725,7 @@ func _refresh_labels() -> void:
 		if not _player_no.has(key):
 			_player_no[key] = _next_player
 			_next_player += 1
-		entries.append([_unit_of(key).id, "P%d" % _player_no[key], int(key.get_slice(":", 0))])
+		entries.append([_unit_of(key).id, "P%d" % _player_no[key], int(key.get_slice(":", 0)), key.get_slice(":", 1)])
 	_apply_seats(entries)
 	if net != null:
 		net.send(0, [Msg.SEATS, entries])
@@ -563,13 +734,16 @@ func _refresh_labels() -> void:
 func _apply_seats(entries: Array) -> void:
 	var labels := {}
 	var mine := PackedStringArray()
+	_my_seats.clear()
 	var me := net.id() if net != null else LOCAL
 	for e in entries:
-		if not (e is Array and e.size() == 3 and e[0] is int and e[1] is String and e[2] is int):
+		if not (e is Array and e.size() == 4 and e[0] is int and e[1] is String and e[2] is int and e[3] is String):
 			continue
 		labels[e[0]] = e[1]
-		if e[2] == me:
+		var device := LocalInput.DEVICES.find(e[3])
+		if e[2] == me and device >= 0:
 			mine.append(e[1])
+			_my_seats.append([e[0], device])
 	_view.labels = labels
 	you = ", ".join(mine)
 

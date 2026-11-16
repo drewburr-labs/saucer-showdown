@@ -756,9 +756,14 @@ func load_state(bytes: PackedByteArray) -> void:
 ## A 32-bit fingerprint of the whole state. Peers compare these to catch a
 ## desync on the tick it happens.
 func checksum() -> int:
+	return hash_state(save_state())
+
+
+## The checksum of a state from save_state().
+static func hash_state(state: PackedByteArray) -> int:
 	var h := HashingContext.new()
 	h.start(HashingContext.HASH_MD5)
-	h.update(save_state())
+	h.update(state)
 	return h.finish().decode_u32(0)
 
 

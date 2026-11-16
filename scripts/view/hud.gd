@@ -54,7 +54,7 @@ func _draw() -> void:
 		_draw_team(sim, team)
 	_draw_route(sim)
 
-	if sim.winner >= 0:
+	if game.win_confirmed:
 		_draw_banner(sim)
 	elif game.paused:
 		_draw_paused()
@@ -201,7 +201,7 @@ func _draw_route(sim: Sim) -> void:
 	_text(_title, Vector2(x0, 31), score, 28, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, x1 - x0, true)
 	var clock := "%d:%02d" % [int(sim.time) / 60, int(sim.time) % 60]
 	_text(_font, Vector2(x0, 31), clock, 13, Color(1, 1, 1, 0.55), HORIZONTAL_ALIGNMENT_RIGHT, x1 - x0 - 4.0)
-	_text(_font, Vector2(x0 + 4.0, 31), "MAP %d" % (game.map_wins[0] + game.map_wins[1] + (0 if sim.winner >= 0 else 1)), 13, Color(1, 1, 1, 0.55), HORIZONTAL_ALIGNMENT_LEFT, 80.0)
+	_text(_font, Vector2(x0 + 4.0, 31), "MAP %d" % (game.map_wins[0] + game.map_wins[1] + (0 if game.win_confirmed else 1)), 13, Color(1, 1, 1, 0.55), HORIZONTAL_ALIGNMENT_LEFT, 80.0)
 
 
 func _draw_banner(sim: Sim) -> void:

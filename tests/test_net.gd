@@ -6,6 +6,7 @@ extends SceneTree
 ##   godot --headless --path . --script tests/test_net.gd
 
 const Main = preload("res://scripts/main.gd")
+const Sim = preload("res://scripts/sim/sim.gd")
 const LocalInput = preload("res://scripts/input/local_input.gd")
 
 const PORT := 24690
@@ -47,6 +48,18 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	_current = "offline win: banner, score, next map"
+	var solo := _game(7)
+	await physics_frame
+	solo.sim._win(0, Sim.Win.ECONOMIC)
+	await physics_frame
+	_check(solo.win_confirmed and solo.map_wins == [1, 0], "a win should count at once offline (%s)" % [solo.map_wins])
+	var solo_epoch: int = solo._epoch
+	_check(await _until(func() -> bool: return solo._epoch > solo_epoch, 4.0), "a press after the banner starts the next map")
+	_check(not solo.win_confirmed and solo.map_wins == [1, 0], "the next map starts clean, score kept")
+	solo.queue_free()
+	_report()
+
 	var host := _game(1)
 	var c1 := _game(2)
 	await physics_frame
@@ -98,7 +111,14 @@ func _run() -> void:
 	_report()
 
 	_current = "a desynced client is put back in step"
-	c2.sim.silo[0] += 5 # corrupt it
+	# Corrupt it, rollback history included, so a rewind can't quietly undo it.
+	c2.sim.silo[0] += 5
+	var scratch := Sim.new(1, c2.greys_per_team)
+	for k: int in c2._states:
+		scratch.load_state(c2._states[k])
+		scratch.silo[0] += 5
+		c2._states[k] = scratch.save_state()
+	scratch.dispose()
 	var fixes: int = host.resyncs
 	_check(await _until(func() -> bool: return host.resyncs > fixes, 3.0), "host should spot the bad checksum")
 	_check(await _until(func() -> bool: return c2.sim.silo == host.sim.silo, 2.0), "client should get the host's state back")
@@ -124,7 +144,40 @@ func _run() -> void:
 	_check(await _until(func() -> bool: return c2.role == Main.Role.OFFLINE, 8.0), "client should notice the host is gone")
 	_report()
 
-	for g in [host, c1, c2, c3]:
+	_current = "60 ms each way: predicts, rolls back, stays in step"
+	var h2 := _game(5)
+	var c4 := _game(6)
+	h2.fake_lag_ms = 60
+	c4.fake_lag_ms = 60
+	await physics_frame
+	h2.host(PORT + 1)
+	c4.sums_log.clear()
+	c4.join("127.0.0.1:%d" % (PORT + 1))
+	_check(await _until(func() -> bool: return c4._started, 8.0), "client should get the match")
+	var t0: int = h2.sim.tick
+	var f0 := Engine.get_physics_frames()
+	var most_ahead := 0
+	var stalled := 0
+	var frames := 0
+	var end := Time.get_ticks_msec() + 6000
+	while Time.get_ticks_msec() < end:
+		await physics_frame
+		frames += 1
+		most_ahead = maxi(most_ahead, c4.sim.tick - c4._confirmed)
+		if h2.waiting_t > 0 or c4.waiting_t > 0:
+			stalled += 1
+	var pace := float(h2.sim.tick - t0) / float(Engine.get_physics_frames() - f0)
+	print("      pace %.2f ticks/frame, client up to %d ticks ahead of confirmed, %d rollbacks, stalled %d of %d frames" % [
+			pace, most_ahead, c4.rollbacks, stalled, frames])
+	_check(pace > 0.9, "the game should keep real-time pace, not wait on the network (%.2f)" % pace)
+	_check(most_ahead >= 3, "the client should be predicting ahead of confirmed frames (%d)" % most_ahead)
+	_check(c4.rollbacks > 10, "wrong guesses should have been rolled back (%d)" % c4.rollbacks)
+	_check(stalled < frames / 10, "stalls should be rare (%d of %d frames)" % [stalled, frames])
+	_check_sync(h2, c4, 250)
+	_check(h2.resyncs == 0, "no desyncs (%d resyncs)" % h2.resyncs)
+	_report()
+
+	for g in [host, c1, c2, c3, h2, c4]:
 		g.queue_free()
 	await process_frame
 	print("\n%s" % ("ALL TESTS PASSED" if _failed == 0 else "%d TEST(S) FAILED" % _failed))

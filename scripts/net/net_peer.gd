@@ -11,22 +11,26 @@ extends RefCounted
 ##                   SUM     epoch, tick, checksum  (every Main.SUM_EVERY ticks)
 ##   host -> client  REJECT  reason
 ##                   START   epoch, seed, greys, wins0, wins1, match winner, snapshot, paused
-##                   FRAME   epoch, tick, InputFrame
-##                   SEATS   [[unit id, label, peer id], ...]
+##                   FRAME   epoch, tick, InputFrame   (confirmed: everyone's real input)
+##                   SEATS   [[unit id, label, peer id, device], ...]
 ##                   PAUSE   paused
+##                   SYNC    how many ticks early this client's inputs arrive, on average
 ## The epoch goes up with every new map, so stale inputs and frames are dropped.
 
 const Sim = preload("res://scripts/sim/sim.gd")
 const InputFrame = preload("res://scripts/sim/input_frame.gd")
 
 const PORT := 24680
-const PROTOCOL := 1
+const PROTOCOL := 2
 const MAX_CLIENTS := 7
 const HOST_ID := 1
 
-enum Msg { HELLO, REJECT, START, FRAME, INPUT, SEATS, NEXT, SUM, PAUSE }
+enum Msg { HELLO, REJECT, START, FRAME, INPUT, SEATS, NEXT, SUM, PAUSE, SYNC }
 
 var is_host := false
+## Testing aid: hold every outgoing packet this long before sending it.
+var lag_ms := 0
+var _outbox: Array = [] # [due msec, to, bytes] while lag_ms > 0
 var _peer: ENetMultiplayerPeer
 var _events: Array = []
 var _ids: Dictionary = {} # connected peer ids (host)
@@ -94,16 +98,30 @@ func send(to: int, m: Array) -> void:
 		return
 	if is_host and to != 0 and not _has_peer(to):
 		return
-	_peer.set_target_peer(to)
-	_peer.transfer_mode = MultiplayerPeer.TRANSFER_MODE_RELIABLE
-	_peer.transfer_channel = 0
-	_peer.put_packet(var_to_bytes(m))
+	if lag_ms > 0:
+		_outbox.append([Time.get_ticks_msec() + lag_ms, to, var_to_bytes(m)])
+		return
+	_put(to, var_to_bytes(m))
 
 
 ## Push queued packets out now instead of at the next poll.
 func flush() -> void:
-	if _peer != null and not _closed and _peer.host != null:
+	if _peer == null or _closed:
+		return
+	var now := Time.get_ticks_msec()
+	while not _outbox.is_empty() and _outbox[0][0] <= now:
+		var o: Array = _outbox.pop_front()
+		if not is_host or o[1] == 0 or _has_peer(o[1]):
+			_put(o[1], o[2])
+	if _peer.host != null:
 		_peer.host.flush()
+
+
+func _put(to: int, bytes: PackedByteArray) -> void:
+	_peer.set_target_peer(to)
+	_peer.transfer_mode = MultiplayerPeer.TRANSFER_MODE_RELIABLE
+	_peer.transfer_channel = 0
+	_peer.put_packet(bytes)
 
 
 ## Round-trip time to `peer` in ms, or -1.
