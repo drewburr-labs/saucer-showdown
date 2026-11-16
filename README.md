@@ -52,8 +52,8 @@ Press **F6**. One player picks **Host a game**; the panel shows the address frie
 - Everyone needs the same build; a mismatched one is turned away with the two versions named.
 - Only the host can pause, restart, or change the team size. Anyone can move the win banner on.
 - It works on a LAN, or over the internet if the host forwards **UDP port 24680** on their router. There's no matchmaking or relay yet.
-- Online play adds 4 ticks (about 67 ms) of input delay, for everyone including the host. Everyone waits for the slowest connection, so a lagging player stalls the game ("Waiting for players…") rather than desyncing it.
-- From the command line: `--host`, `--join=ADDRESS[:PORT]`, `--port=N` (after `--`).
+- Online play uses rollback netcode: your own moves show at once (after 2 ticks, about 33 ms, of input delay) and other players' are predicted, then corrected when their real input arrives. A correction can make a remote player jump a little. The game only waits ("Waiting for players…") if a connection falls more than 200 ms behind.
+- From the command line: `--host`, `--join=ADDRESS[:PORT]`, `--port=N`, and `--lag=MS` to fake a slow connection for testing (after `--`). `--lag` delays every packet this machine sends; the ping shown doesn't include it.
 
 ## Layout
 
@@ -86,7 +86,7 @@ tools/
 tests/
   test_sim.gd          headless tests for every rule and win condition
   test_updater.gd      headless tests for version ordering and asset choice
-  test_net.gd          host and clients over loopback, checked tick by tick
+  test_net.gd          host and clients over loopback (and with fake lag), checked tick by tick
   bot_stats.gd         balance probe: how bot-only matches end
 export_presets.cfg     Linux and Windows export settings
 .github/workflows/
@@ -98,7 +98,13 @@ The simulation is deterministic and separate from rendering: inputs in, one fixe
 
 ## How online play works
 
-Offline and online run the same loop in `main.gd`. Each machine samples its local devices into one input packet per tick and hands it to the host (offline, the machine is its own host). The host applies seat changes, packs everyone's input into one `InputFrame` per tick, and sends it to every client. Every machine steps its sim only on those frames, so all of them run the identical match. That is delay-based lockstep; rollback can be added on top later without changing the sim.
+Offline and online run the same loop in `main.gd`. Each machine samples its local devices into one input packet per tick and hands it to the host (offline, the machine is its own host). Once the host has everyone's input for a tick, it applies seat changes, packs the inputs into a confirmed `InputFrame`, and sends it to every client.
+
+Each machine runs its sim at the "present", ahead of the last confirmed frame. For ticks not yet confirmed it predicts: its own players' input is known, and everyone else is assumed to keep doing what they last did. When a confirmed frame disagrees with what was predicted, it loads the saved state from that tick and replays up to the present. Every machine therefore ends up with the identical match. Offline, every frame is confirmed at once and nothing is predicted.
+
+- **Time sync:** the host measures how early each client's inputs arrive and tells it (`SYNC`). The client gains or drops a tick every other frame until its inputs arrive about a tick early. In practice a client runs ahead of the host by half the round trip, the host almost never rolls back, and each client predicts about one round trip ahead.
+- **Limits:** the present never runs more than 12 ticks (200 ms) past the confirmed frames; beyond that it waits.
+- **Effects:** a replayed tick doesn't repeat the effects it already showed. The win banner and score wait for the win to be confirmed.
 
 - **Late joiners** get a snapshot of the host's sim, then the frames from there on.
 - **Desyncs:** every second each client sends its checksum; if it doesn't match the host's, the host sends that client its current state and it carries on.
@@ -172,5 +178,5 @@ To rehearse an update against a local feed, debug exports accept `-- --update-fe
 - Bot balance: since saucers take 3 hits, bot-only matches mostly end in Economic wins after roughly 2–3 minutes, still short of the 3–5 minute target.
 - The Windows half of the updater has not been run on Windows yet.
 - No audio and no main menu. The art is a first pass, not final.
-- Online: no NAT traversal or relay, so internet play needs a forwarded port; the input delay is fixed rather than tuned to the connection.
-- The sim's events (bursts, "HEIST!" pop-ups) aren't rollback-aware yet; that only matters once rollback replaces lockstep.
+- Online: no NAT traversal or relay, so internet play needs a forwarded port.
+- Online: a rollback correction moves remote players instantly instead of smoothing them into place, and an effect from a wrong prediction (say, a hit that didn't happen) stays on screen.
