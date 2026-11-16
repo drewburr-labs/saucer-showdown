@@ -20,6 +20,8 @@ const Sim = preload("res://scripts/sim/sim.gd")
 const InputFrame = preload("res://scripts/sim/input_frame.gd")
 const LocalInput = preload("res://scripts/input/local_input.gd")
 const NetPeer = preload("res://scripts/net/net_peer.gd")
+const RelayLink = preload("res://scripts/net/relay_link.gd")
+const RP = preload("res://scripts/net/relay_protocol.gd")
 const ArenaView = preload("res://scripts/view/arena_view.gd")
 const Hud = preload("res://scripts/view/hud.gd")
 const OnlineMenu = preload("res://scripts/view/online_menu.gd")
@@ -35,6 +37,7 @@ const SUM_EVERY := 60 # clients report a checksum this often
 const SYNC_EVERY := 30 # host tells clients how early their inputs arrive this often
 const TARGET_LEAD := 1.0 # ticks early a client's input should reach the host
 const WAIT_NOTICE := 30 # ticks stalled before the HUD says so
+const PING_EVERY := 60 # clients time a round trip to the host this often
 
 var sim: Sim
 var humans: Dictionary = {} # host: "peer:device" -> {"team": int, "idx": int}; idx 0 is the Overlord
@@ -47,7 +50,10 @@ var show_help := true
 var updater: Updater
 
 var role := Role.OFFLINE
-var net: NetPeer
+var net: NetPeer # a RelayLink when going through the relay
+var relay_address := "%s:%d" % [RP.HOST_NAME, RP.PORT] # --relay=HOST[:PORT] overrides it
+var room_code := "" # the relay room we host or joined
+var ping_ms := -1 # client: round trip to the host, relay included
 var input_delay := 0
 var fingerprint := 0 # proves to the host that we run the same sim; 0 until needed
 var fake_lag_ms := 0 # testing aid: delay every packet we send (--lag=N)
@@ -127,16 +133,39 @@ func _read_cmdline() -> void:
 			_host_port = int(a.trim_prefix("--port="))
 		elif a.begins_with("--lag="):
 			fake_lag_ms = int(a.trim_prefix("--lag="))
+		elif a.begins_with("--relay="):
+			relay_address = a.trim_prefix("--relay=")
 	if host_now:
-		host(_host_port)
+		host_lan(_host_port)
 	elif _join_addr != "":
 		join(_join_addr)
 
 
 # --- Going online --------------------------------------------------------
 
-## Start hosting. Returns "" or what went wrong.
-func host(port: int = NetPeer.PORT) -> String:
+## Host through the relay; a room code arrives shortly. Returns "" or what
+## went wrong.
+func host() -> String:
+	if role != Role.OFFLINE:
+		leave()
+	_ensure_fingerprint()
+	var link := RelayLink.new()
+	link.lag_ms = fake_lag_ms
+	var err := link.host_relay(_split_host(relay_address), _split_port(relay_address, RP.PORT))
+	if err != OK:
+		return "Couldn't reach the relay server (%s)." % error_string(err)
+	net = link
+	role = Role.HOST
+	room_code = ""
+	input_delay = ONLINE_DELAY
+	_refresh_labels()
+	net_status = "Opening a room…"
+	return ""
+
+
+## Host directly on this machine (LAN, or a forwarded port). Returns "" or
+## what went wrong.
+func host_lan(port: int = NetPeer.PORT) -> String:
 	if role != Role.OFFLINE:
 		leave()
 	_ensure_fingerprint()
@@ -154,32 +183,49 @@ func host(port: int = NetPeer.PORT) -> String:
 	return ""
 
 
-## Join a host at "address" or "address:port". Returns "" or what went wrong.
-func join(address: String) -> String:
+## Join by room code (through the relay), or by "address[:port]" for a
+## direct host. Returns "" or what went wrong.
+func join(where: String) -> String:
 	if role != Role.OFFLINE:
 		leave()
-	var port := NetPeer.PORT
-	var host_name := address.strip_edges()
-	if host_name.count(":") == 1:
-		port = int(host_name.get_slice(":", 1))
-		host_name = host_name.get_slice(":", 0)
-	if host_name == "":
-		return "Type the host's address first."
+	where = where.strip_edges()
+	if where == "":
+		return "Type the room code first."
 	_ensure_fingerprint()
-	net = NetPeer.new()
-	net.lag_ms = fake_lag_ms
-	var err := net.join(host_name, port)
-	if err != OK:
-		net = null
-		return "Couldn't start connecting (%s)." % error_string(err)
+	var code := RP.normalize_code(where)
+	if code != "":
+		var link := RelayLink.new()
+		link.lag_ms = fake_lag_ms
+		var err := link.join_relay(_split_host(relay_address), _split_port(relay_address, RP.PORT), code)
+		if err != OK:
+			return "Couldn't reach the relay server (%s)." % error_string(err)
+		net = link
+		room_code = code
+	else:
+		net = NetPeer.new()
+		net.lag_ms = fake_lag_ms
+		var err := net.join(_split_host(where), _split_port(where, NetPeer.PORT))
+		if err != OK:
+			net = null
+			return "Couldn't start connecting (%s)." % error_string(err)
+		room_code = ""
 	role = Role.CLIENT
-	_join_addr = address
+	_join_addr = where
 	_started = false
 	_epoch = -1
 	input_delay = ONLINE_DELAY
 	paused = false
-	net_status = "Connecting to %s…" % address
+	ping_ms = -1
+	net_status = "Joining %s…" % (room_code if room_code != "" else where)
 	return ""
+
+
+func _split_host(address: String) -> String:
+	return address.get_slice(":", 0) if address.count(":") == 1 else address
+
+
+func _split_port(address: String, fallback: int) -> int:
+	return int(address.get_slice(":", 1)) if address.count(":") == 1 else fallback
 
 
 func leave() -> void:
@@ -194,6 +240,8 @@ func _go_offline(reason: String) -> void:
 	role = Role.OFFLINE
 	input_delay = 0
 	net_status = ""
+	room_code = ""
+	ping_ms = -1
 	_started = false
 	for id: int in _peers.keys():
 		if id != LOCAL:
@@ -322,6 +370,8 @@ func _physics_process(_delta: float) -> void:
 	_check_win()
 	if role == Role.HOST and Engine.get_physics_frames() % SYNC_EVERY == 0:
 		_send_sync()
+	if role == Role.CLIENT and _started and Engine.get_physics_frames() % PING_EVERY == 0:
+		net.send(LOCAL, [Msg.PING, Time.get_ticks_msec()])
 	if net != null:
 		net.flush()
 	_update_status()
@@ -578,13 +628,24 @@ func _net_events() -> void:
 					_drop_peer(ev[1])
 					_refresh_labels()
 					_say("%s left; bots take over." % had if had != "" else "A player left.")
+			"room":
+				room_code = ev[1]
+				_say("Room code %s. Friends press F6 and type it in." % room_code)
 			"connected":
 				net.send(LOCAL, [Msg.HELLO, NetPeer.PROTOCOL, updater.version, fingerprint])
 				net_status = "Connected, waiting for the host…"
+			"refused":
+				_go_offline(ev[1])
 			"failed":
-				_go_offline("Couldn't reach a host at %s." % _join_addr)
+				if net is RelayLink:
+					_go_offline("Couldn't reach the relay server at %s." % relay_address)
+				else:
+					_go_offline("Couldn't reach a host at %s." % _join_addr)
 			"closed":
-				_go_offline("The host closed the game." if _started else "The host turned us away.")
+				if role == Role.HOST:
+					_go_offline("Lost the connection to the relay server.")
+				else:
+					_go_offline("The host closed the game." if _started else "The host turned us away.")
 			"msg":
 				if role == Role.HOST:
 					_host_msg(ev[1], ev[2])
@@ -625,6 +686,9 @@ func _host_msg(id: int, m: Array) -> void:
 			if p["greeted"] and NetPeer.valid(m, [TYPE_INT]) and m[1] == _epoch \
 					and win_confirmed and _win_ticks > 60:
 				_advance_map()
+		Msg.PING:
+			if p["greeted"] and NetPeer.valid(m, [TYPE_INT]):
+				net.send(id, [Msg.PONG, m[1]])
 		Msg.SUM:
 			if not p["greeted"] or not NetPeer.valid(m, [TYPE_INT, TYPE_INT, TYPE_INT]):
 				return
@@ -665,6 +729,10 @@ func _client_msg(m: Array) -> void:
 		Msg.PAUSE:
 			if NetPeer.valid(m, [TYPE_BOOL]):
 				paused = m[1]
+		Msg.PONG:
+			if NetPeer.valid(m, [TYPE_INT]):
+				var rtt: int = Time.get_ticks_msec() - m[1]
+				ping_ms = rtt if ping_ms < 0 else (ping_ms * 3 + rtt) / 4
 		Msg.SYNC:
 			if NetPeer.valid(m, [TYPE_FLOAT]) and _started:
 				# Close half the gap each time, so the correction can't overshoot.
@@ -772,10 +840,14 @@ func _update_status() -> void:
 			for id: int in _peers:
 				if id != LOCAL and _peers[id]["greeted"]:
 					n += 1
-			net_status = "Hosting at %s  ·  %d joined" % [_host_address(), n]
+			if net is RelayLink:
+				net_status = "Room %s  ·  %d joined" % [room_code, n] if room_code != "" else "Opening a room…"
+			else:
+				net_status = "Hosting at %s  ·  %d joined" % [_host_address(), n]
 		Role.CLIENT:
 			if _started:
-				net_status = "Online  ·  %d ms" % net.ping(LOCAL)
+				var where := "Room %s" % room_code if room_code != "" else "Online"
+				net_status = "%s  ·  %s" % [where, "%d ms" % ping_ms if ping_ms >= 0 else "…"]
 
 
 func _unhandled_key_input(event: InputEvent) -> void:

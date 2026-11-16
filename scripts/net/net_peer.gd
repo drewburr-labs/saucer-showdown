@@ -1,5 +1,7 @@
 extends RefCounted
-## ENet transport for online play: one host and up to MAX_CLIENTS clients.
+## Direct ENet transport for online play: one host and up to MAX_CLIENTS
+## clients, on a LAN or through a forwarded port. relay_link.gd extends this
+## to go through the relay server instead, which is what players normally use.
 ## Messages are short Arrays, sent reliably and in order on one channel. They
 ## are decoded with bytes_to_var, which never builds objects, and handlers
 ## check each message's shape with valid() before trusting it.
@@ -9,23 +11,25 @@ extends RefCounted
 ##                   INPUT   epoch, tick, local input packet (LocalInput.packet())
 ##                   NEXT    epoch                  (wants the next map after a win)
 ##                   SUM     epoch, tick, checksum  (every Main.SUM_EVERY ticks)
+##                   PING    msec                   (the host answers PONG with the same msec)
 ##   host -> client  REJECT  reason
 ##                   START   epoch, seed, greys, wins0, wins1, match winner, snapshot, paused
 ##                   FRAME   epoch, tick, InputFrame   (confirmed: everyone's real input)
 ##                   SEATS   [[unit id, label, peer id, device], ...]
 ##                   PAUSE   paused
 ##                   SYNC    how many ticks early this client's inputs arrive, on average
+##                   PONG    msec from the client's PING
 ## The epoch goes up with every new map, so stale inputs and frames are dropped.
 
 const Sim = preload("res://scripts/sim/sim.gd")
 const InputFrame = preload("res://scripts/sim/input_frame.gd")
 
 const PORT := 24680
-const PROTOCOL := 2
+const PROTOCOL := 3
 const MAX_CLIENTS := 7
 const HOST_ID := 1
 
-enum Msg { HELLO, REJECT, START, FRAME, INPUT, SEATS, NEXT, SUM, PAUSE, SYNC }
+enum Msg { HELLO, REJECT, START, FRAME, INPUT, SEATS, NEXT, SUM, PAUSE, SYNC, PING, PONG }
 
 var is_host := false
 ## Testing aid: hold every outgoing packet this long before sending it.

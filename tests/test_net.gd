@@ -7,9 +7,18 @@ extends SceneTree
 
 const Main = preload("res://scripts/main.gd")
 const Sim = preload("res://scripts/sim/sim.gd")
+const RelayServer = preload("res://scripts/relay/relay_server.gd")
 const LocalInput = preload("res://scripts/input/local_input.gd")
 
 const PORT := 24690
+
+
+## Runs a relay server inside the test, polled every physics frame.
+class RelayNode extends Node:
+	var relay: RelayServer
+
+	func _physics_process(_delta: float) -> void:
+		relay.poll()
 
 
 ## Plays kb1 like a restless human: a new random move and buttons every few ticks.
@@ -63,7 +72,7 @@ func _run() -> void:
 	var host := _game(1)
 	var c1 := _game(2)
 	await physics_frame
-	_check(host.host(PORT) == "", "host should start")
+	_check(host.host_lan(PORT) == "", "host should start")
 	c1.sums_log.clear() # forget its own offline game
 	_check(c1.join("127.0.0.1:%d" % PORT) == "", "client should start connecting")
 
@@ -150,7 +159,7 @@ func _run() -> void:
 	h2.fake_lag_ms = 60
 	c4.fake_lag_ms = 60
 	await physics_frame
-	h2.host(PORT + 1)
+	h2.host_lan(PORT + 1)
 	c4.sums_log.clear()
 	c4.join("127.0.0.1:%d" % (PORT + 1))
 	_check(await _until(func() -> bool: return c4._started, 8.0), "client should get the match")
@@ -179,6 +188,63 @@ func _run() -> void:
 
 	for g in [host, c1, c2, c3, h2, c4]:
 		g.queue_free()
+	await process_frame
+
+	_current = "relay: host gets a room code, a friend joins with it"
+	var relay_node := RelayNode.new()
+	relay_node.relay = RelayServer.new()
+	relay_node.relay.quiet = true
+	_check(relay_node.relay.start(PORT + 2, "127.0.0.1") == OK, "relay should start")
+	root.add_child(relay_node)
+	var relay_at := "127.0.0.1:%d" % (PORT + 2)
+	var rh := _game(8)
+	var rc := _game(9)
+	for g in [rh, rc]:
+		g.relay_address = relay_at
+		g.fake_lag_ms = 30
+	await physics_frame
+	_check(rh.host() == "", "hosting through the relay should start")
+	_check(await _until(func() -> bool: return rh.room_code.length() == 5, 4.0), "host should get a room code (%s)" % rh.room_code)
+	rc.sums_log.clear()
+	_check(rc.join(rh.room_code.to_lower()) == "", "joining by code should start (any case)")
+	_check(await _until(func() -> bool: return rc._started and rc.sim.tick > 300, 8.0), "friend should be playing through the relay")
+	_check(rh.humans.has("%d:kb1" % rc.net.id()), "friend should have a seat")
+	_check(rc.ping_ms >= 60, "ping should be the real round trip through the relay, fake lag included (%d ms)" % rc.ping_ms)
+	_check(rc.net_status.contains(rh.room_code), "friend's status names the room (%s)" % rc.net_status)
+	_check(rh.net_status.contains("1 joined"), "host's status counts the friend (%s)" % rh.net_status)
+	_check_sync(rh, rc, 250)
+	_check(rh.resyncs == 0, "no desyncs through the relay")
+	_report()
+
+	_current = "relay: wrong code is refused"
+	var rx := _game(10)
+	rx.relay_address = relay_at
+	await physics_frame
+	rx.join("ZZZZZ")
+	_check(await _until(func() -> bool: return rx.role == Main.Role.OFFLINE, 4.0), "a wrong code should be turned down")
+	_check(rx.notice.contains("No game with the code ZZZZZ"), "and say so (%s)" % rx.notice)
+	_report()
+
+	_current = "relay: host leaving ends the room"
+	rh.leave()
+	_check(await _until(func() -> bool: return rc.role == Main.Role.OFFLINE, 4.0), "the friend should be sent home")
+	_check(rc.notice.contains("host closed"), "and told why (%s)" % rc.notice)
+	_check(await _until(func() -> bool: return relay_node.relay.room_count() == 0, 2.0), "the relay should drop the room")
+	_report()
+
+	_current = "relay: unreachable relay"
+	var rz := _game(11)
+	rz.relay_address = "127.0.0.1:%d" % (PORT + 3) # nothing listens here
+	await physics_frame
+	rz.host()
+	_check(await _until(func() -> bool: return rz.role == Main.Role.OFFLINE, 12.0), "hosting should give up")
+	_check(rz.notice.contains("relay server"), "and say the relay is unreachable (%s)" % rz.notice)
+	_report()
+
+	for g in [rh, rc, rx, rz]:
+		g.queue_free()
+	relay_node.relay.stop()
+	relay_node.queue_free()
 	await process_frame
 	print("\n%s" % ("ALL TESTS PASSED" if _failed == 0 else "%d TEST(S) FAILED" % _failed))
 	quit(1 if _failed > 0 else 0)

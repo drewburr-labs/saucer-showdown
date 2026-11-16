@@ -1,18 +1,19 @@
 extends CanvasLayer
-## The F6 "Play online" panel: host a game, join one by address, or leave.
+## The F6 "Play online" panel: host a game and get a room code, join one by
+## its code, or leave. Games go through the relay server.
 ## Offline, the match waits while it is open; online, your input is muted so
 ## typing an address doesn't move your saucer.
 
 const Art = preload("res://scripts/view/art.gd")
 
 const GOLD := Color("ffd84a")
-const SAVE_PATH := "user://online.cfg"
 
 var game # Main
 
 var _root: Control
 var _addr: LineEdit
 var _status: Label
+var _code: Label
 var _host_btn: Button
 var _join_btn: Button
 var _leave_btn: Button
@@ -50,19 +51,28 @@ func _ready() -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(title)
 
-	var blurb := _label("Host a game, or join one by its address. Everyone needs the same version. Bots fill every seat nobody takes.", 15, Color(1, 1, 1, 0.75))
+	var blurb := _label("Host a game to get a room code, then friends type it in below. Everyone needs the same version. Bots fill every seat nobody takes.", 15, Color(1, 1, 1, 0.75))
 	box.add_child(blurb)
 
 	_host_btn = _button("Host a game")
 	_host_btn.pressed.connect(_on_host)
 	box.add_child(_host_btn)
 
+	_code = Label.new()
+	_code.add_theme_font_override("font", Art.title_font())
+	_code.add_theme_font_size_override("font_size", 46)
+	_code.add_theme_color_override("font_color", Color.WHITE)
+	_code.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_code.visible = false
+	box.add_child(_code)
+
 	box.add_child(_label("Join a game", 15, Color(1, 1, 1, 0.75)))
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 10)
 	box.add_child(row)
 	_addr = LineEdit.new()
-	_addr.placeholder_text = "Host's address, e.g. 192.168.1.20"
+	_addr.placeholder_text = "Room code, e.g. KX4PZ"
+	_addr.max_length = 64
 	_addr.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_addr.text_submitted.connect(func(_t: String) -> void: _on_join())
 	row.add_child(_addr)
@@ -84,9 +94,6 @@ func _ready() -> void:
 	close.pressed.connect(toggle)
 	bottom.add_child(close)
 
-	var cfg := ConfigFile.new()
-	if cfg.load(SAVE_PATH) == OK:
-		_addr.text = cfg.get_value("online", "last_address", "")
 
 
 func is_open() -> bool:
@@ -114,6 +121,8 @@ func _refresh() -> void:
 	_join_btn.disabled = online
 	_addr.editable = not online
 	_leave_btn.visible = online
+	_code.visible = game.role == game.Role.HOST and game.room_code != ""
+	_code.text = "  ".join(game.room_code.split(""))
 	if online:
 		_status.text = game.net_status
 
@@ -127,10 +136,6 @@ func _on_join() -> void:
 	var addr := _addr.text.strip_edges()
 	var err: String = game.join(addr)
 	_status.text = err if err != "" else game.net_status
-	if err == "":
-		var cfg := ConfigFile.new()
-		cfg.set_value("online", "last_address", addr)
-		cfg.save(SAVE_PATH)
 
 
 func _label(text: String, size: int, color: Color) -> Label:
