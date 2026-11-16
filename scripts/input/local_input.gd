@@ -3,6 +3,7 @@ extends RefCounted
 ## game never touches Input directly. Call poll() once per tick.
 
 const InputFrame = preload("res://scripts/sim/input_frame.gd")
+const Settings = preload("res://scripts/settings.gd")
 
 const DEVICES := ["kb1", "kb2", "pad0", "pad1", "pad2", "pad3"]
 ## A packet holds every device's state in InputFrame's 5-byte layout, with
@@ -61,24 +62,21 @@ func _blank() -> Dictionary:
 
 
 func _read(device: String) -> Dictionary:
-	match device:
-		"kb1":
-			return _keys(KEY_A, KEY_D, KEY_W, KEY_S, [KEY_SPACE, KEY_W], [KEY_J, KEY_F], [KEY_K, KEY_G], [KEY_Q])
-		"kb2":
-			return _keys(KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN, [KEY_UP, KEY_KP_0],
-					[KEY_PERIOD, KEY_KP_1], [KEY_SLASH, KEY_KP_2], [KEY_ENTER, KEY_KP_ENTER])
+	if device.begins_with("kb"):
+		return _keys(device)
 	return _pad(int(device.substr(3)))
 
 
-func _keys(left: int, right: int, up: int, down: int, jump: Array, action: Array, beam: Array, swap: Array) -> Dictionary:
+## A keyboard player, through the key bindings in Settings.
+func _keys(device: String) -> Dictionary:
 	var s := _blank()
 	s["move"] = Vector2(
-		float(_down(right)) - float(_down(left)),
-		float(_down(down)) - float(_down(up)))
-	s["jump"] = _any(jump)
-	s["action"] = _any(action)
-	s["beam"] = _any(beam)
-	s["swap"] = _any(swap)
+		float(_any(Settings.keys(device, "right"))) - float(_any(Settings.keys(device, "left"))),
+		float(_any(Settings.keys(device, "down"))) - float(_any(Settings.keys(device, "up"))))
+	s["jump"] = _any(Settings.keys(device, "jump"))
+	s["action"] = _any(Settings.keys(device, "action"))
+	s["beam"] = _any(Settings.keys(device, "beam"))
+	s["swap"] = _any(Settings.keys(device, "swap"))
 	s["join"] = s["swap"]
 	return s
 
@@ -102,10 +100,6 @@ func _pad(id: int) -> Dictionary:
 	s["swap"] = Input.is_joy_button_pressed(id, JOY_BUTTON_Y)
 	s["join"] = Input.is_joy_button_pressed(id, JOY_BUTTON_START) or s["jump"]
 	return s
-
-
-func _down(key: int) -> bool:
-	return Input.is_physical_key_pressed(key)
 
 
 func _any(keys: Array) -> bool:
