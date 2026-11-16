@@ -58,7 +58,7 @@ var map_wins := [0, 0]
 var match_winner := -1
 var win_confirmed := false # sim.winner is set and every frame up to it is confirmed
 var paused := false
-var show_help := true
+var show_help := false # the controls overlay, toggled with F1
 var updater: Updater
 
 var role := Role.OFFLINE
@@ -83,12 +83,10 @@ var _epoch := 0
 var _seed := 0
 var _win_ticks := 0
 var _next_sent := false
-var _help_ticks := 480 # the controls overlay hides itself after 8 s
 var _input = LocalInput.new() # untyped so tests can script it
 var _view: ArenaView
 var _hud: Hud
 var _menu: Menus
-var _help_once := false
 var _host_port := NetPeer.PORT
 var _join_addr := ""
 
@@ -132,7 +130,6 @@ func _ready() -> void:
 	Settings.apply_all()
 	_peers[LOCAL] = _peer_state(true)
 	player_name = Settings.player_name()
-	show_help = false
 	_start_attract()
 	_read_cmdline()
 
@@ -321,11 +318,6 @@ func _start_match() -> void:
 	in_match = true
 	paused = false
 	_prev_buttons.clear()
-	if not _help_once:
-		# Show the controls for the first few seconds of the first match.
-		_help_once = true
-		show_help = true
-		_help_ticks = 480
 	_new_match()
 
 
@@ -438,10 +430,6 @@ func _advance_map() -> void:
 
 func _physics_process(_delta: float) -> void:
 	_input.poll()
-	if _help_ticks > 0:
-		_help_ticks -= 1
-		if _help_ticks == 0:
-			show_help = false
 	notice_t = maxf(0.0, notice_t - Cfg.TICK)
 	if net != null:
 		_net_events()
@@ -840,10 +828,6 @@ func _client_msg(m: Array) -> void:
 			var resync: bool = _started and m[1] == _epoch
 			if not in_match:
 				in_match = true
-				if not _help_once:
-					_help_once = true
-					show_help = true
-					_help_ticks = 480
 			_epoch = m[1]
 			_seed = m[2]
 			map_wins = [m[4], m[5]]
@@ -1149,7 +1133,6 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		KEY_F1:
 			if in_match:
 				show_help = not show_help
-				_help_ticks = 0
 		KEY_F3:
 			if not in_match:
 				return
