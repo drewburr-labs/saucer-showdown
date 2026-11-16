@@ -5,11 +5,11 @@ extends RefCounted
 ## It never reads the game's messages, so it doesn't change when the game
 ## does, as long as relay_protocol.gd's VERSION stays the same.
 ##
-## run_relay.gd runs it (see the Dockerfile); tests drive poll() themselves.
+## run_relay.gd runs it (see Dockerfile); tests drive poll() themselves.
 ## It uses a raw ENetConnection rather than ENetMultiplayerPeer, so it sees
 ## every connection as a plain peer and can route between them.
 
-const P = preload("res://scripts/net/relay_protocol.gd")
+const P = preload("relay_protocol.gd")
 
 const MAX_PEERS := 1024
 const MAX_ROOMS := 400

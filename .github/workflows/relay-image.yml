@@ -1,14 +1,24 @@
 name: Relay image
 
-# Builds the relay server's container image (see Dockerfile), checks it with
-# tools/relay_probe.gd, and on main pushes it to GHCR as :latest and
+# Builds the relay server's container image (relay/Dockerfile), checks it with
+# relay/relay_probe.gd, and on main pushes it to GHCR as :latest and
 # :sha-<short>, for linux/amd64 and linux/arm64. Pull requests build and
 # test it without pushing.
+#
+# It only runs when relay/ changes (everything in the image comes from
+# there), or this file, which decides how the image is built. "Run workflow"
+# rebuilds by hand, say for a newer base image.
 
 on:
   push:
     branches: [main]
+    paths:
+      - "relay/**"
+      - ".github/workflows/relay-image.yml"
   pull_request:
+    paths:
+      - "relay/**"
+      - ".github/workflows/relay-image.yml"
   workflow_dispatch:
 
 permissions:
@@ -35,7 +45,7 @@ jobs:
       - name: Build for the smoke test
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: relay
           platforms: linux/amd64
           load: true
           tags: relay:test
@@ -60,10 +70,9 @@ jobs:
       - name: Smoke test the image
         run: |
           docker run -d --name relay -p 24680:24680/udp relay:test
-          ~/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64 --headless --path . --import > /dev/null
           ok=0
           for i in 1 2 3; do
-            if timeout 30 ~/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64 --headless --path . --script tools/relay_probe.gd -- 127.0.0.1:24680; then
+            if timeout 30 ~/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64 --headless --path . --script res://relay/relay_probe.gd -- 127.0.0.1:24680; then
               ok=1; break
             fi
             sleep 2
@@ -95,7 +104,7 @@ jobs:
       - name: Build for amd64 and arm64, and push
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: relay
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}

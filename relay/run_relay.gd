@@ -1,9 +1,10 @@
 extends SceneTree
-## Entry point for the relay server (the Docker image runs this):
-##   godot --headless --path . --script res://scripts/relay/run_relay.gd -- [--port=24680] [--bind=*]
+## Entry point for the relay server; the Docker image runs this. From the
+## game's folder:
+##   godot --headless --path . --script res://relay/run_relay.gd -- [--port=24680] [--bind=*]
 
-const RelayServer = preload("res://scripts/relay/relay_server.gd")
-const P = preload("res://scripts/net/relay_protocol.gd")
+const RelayServer = preload("relay_server.gd")
+const P = preload("relay_protocol.gd")
 
 
 func _initialize() -> void:

@@ -4,7 +4,7 @@ extends "res://scripts/net/net_peer.gd"
 ## is open and ["refused", reason] when the relay turns us down.
 ## The relay gives every client an id, and the host is always 1.
 
-const RP = preload("res://scripts/net/relay_protocol.gd")
+const RP = preload("res://relay/relay_protocol.gd")
 const CONNECT_TIMEOUT_MS := 8000
 
 var room_code := ""

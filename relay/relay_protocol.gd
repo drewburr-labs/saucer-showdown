@@ -1,6 +1,7 @@
 extends RefCounted
-## Wire format between the game and the relay server. Every packet starts
-## with a type byte; most then carry a little-endian u32 peer id.
+## Wire format between the game and the relay server. The relay and the game
+## both load this file, so it must not depend on anything else. Every packet
+## starts with a type byte; most then carry a little-endian u32 peer id.
 ##
 ##   game -> relay   HOST    [HOST, version u16]                  open a room
 ##                   JOIN    [JOIN, version u16, code (5 ASCII)]   join one

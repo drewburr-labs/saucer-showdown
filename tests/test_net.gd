@@ -7,7 +7,7 @@ extends SceneTree
 
 const Main = preload("res://scripts/main.gd")
 const Sim = preload("res://scripts/sim/sim.gd")
-const RelayServer = preload("res://scripts/relay/relay_server.gd")
+const RelayServer = preload("res://relay/relay_server.gd")
 const LocalInput = preload("res://scripts/input/local_input.gd")
 
 const PORT := 24690

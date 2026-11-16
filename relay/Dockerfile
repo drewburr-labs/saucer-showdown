@@ -3,11 +3,12 @@
 # The Saucer Showdown relay server: lets players behind home routers play
 # online without port forwarding. It listens on UDP 24680.
 #
-#   docker build -t saucer-showdown-relay .
+#   docker build -t saucer-showdown-relay relay
 #   docker run -p 24680:24680/udp saucer-showdown-relay
 #
-# It runs the relay's GDScript (scripts/relay/) on a headless Godot. Only the
-# relay's own scripts go into the image; see .dockerignore.
+# It runs the relay's GDScript (this folder) on a headless Godot. The build
+# context is this folder alone, and CI (relay-image.yml) rebuilds the image
+# only when something in it changes.
 
 ARG GODOT_VERSION=4.7.2
 ARG TINI_VERSION=0.19.0
@@ -52,14 +53,18 @@ LABEL org.opencontainers.image.title="Saucer Showdown relay" \
 COPY --from=godot /godot /usr/local/bin/godot
 COPY --from=godot /tini /usr/local/bin/tini
 WORKDIR /relay
-COPY project.godot ./
-COPY scripts/net/relay_protocol.gd scripts/net/
-COPY scripts/relay/ scripts/relay/
+# Godot only needs a project file to treat /relay as a project. (relay/ has
+# none of its own: Godot would then skip the folder in the game's project,
+# and the game needs relay_protocol.gd from it.)
+COPY <<EOF project.godot
+config_version=5
+EOF
+COPY relay_protocol.gd relay_server.gd run_relay.gd ./
 # Godot keeps its user data under HOME; give it somewhere writable. (It also
 # logs a harmless "libfontconfig.so.1" line at startup: there are no fonts
 # to load on a headless server.)
 ENV HOME=/tmp
 USER 65532:65532
 EXPOSE 24680/udp
-ENTRYPOINT ["tini", "--", "godot", "--headless", "--path", "/relay", "--script", "res://scripts/relay/run_relay.gd", "--"]
+ENTRYPOINT ["tini", "--", "godot", "--headless", "--path", "/relay", "--script", "res://run_relay.gd", "--"]
 CMD ["--port=24680"]

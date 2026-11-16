@@ -1,10 +1,10 @@
 extends SceneTree
 ## Checks a relay server end to end: opens a room as a host, joins it as a
 ## friend, and passes a packet each way. Exits 0 if all of that works.
-##   godot --headless --path . --script tools/relay_probe.gd -- [host[:port]]
+##   godot --headless --path . --script res://relay/relay_probe.gd -- [host[:port]]
 ## The default is the relay the game uses (relay_protocol.gd).
 
-const P = preload("res://scripts/net/relay_protocol.gd")
+const P = preload("relay_protocol.gd")
 const TIMEOUT_MS := 8000
 
 

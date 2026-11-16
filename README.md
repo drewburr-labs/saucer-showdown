@@ -72,9 +72,6 @@ scripts/
   input/local_input.gd keyboards and gamepads, packed into one packet per tick
   net/net_peer.gd      game message protocol, and the direct ENet transport
   net/relay_link.gd    the same, through the relay server
-  net/relay_protocol.gd  the relay's wire format, address and room codes
-  relay/relay_server.gd  the relay: rooms, codes, forwarding
-  relay/run_relay.gd   the relay's entry point (the Docker image runs this)
   update/updater.gd    update check and self-install from GitHub Releases
   view/
     arena_view.gd      draws the arena from sim state: sprites, animation, particles, glow
@@ -88,18 +85,20 @@ tools/
   screenshot.gd        runs the game and saves screenshots
   sprite_sheet.gd      saves every sprite, in both team colours, on one sheet
   sim_trace.gd         plays fixed matches and writes the sim's checksums
-  relay_probe.gd       checks a relay end to end: open a room, join it, pass packets
 tests/
   test_sim.gd          headless tests for every rule and win condition
   test_updater.gd      headless tests for version ordering and asset choice
   test_net.gd          host and clients over loopback (and with fake lag), checked tick by tick
   bot_stats.gd         balance probe: how bot-only matches end
+relay/                 the relay server and its Docker image (see relay/README.md)
+  relay_server.gd      rooms, codes, forwarding
+  relay_protocol.gd    the wire format and the relay's address; the game loads it too
+  relay_probe.gd       checks a running relay end to end
 export_presets.cfg     Linux and Windows export settings
 .github/workflows/
   release.yml          builds and attaches both platforms to a release
   determinism.yml      checks Linux and Windows simulate identically
-  relay-image.yml      builds, smoke-tests and pushes the relay's container image
-Dockerfile             the relay server's image
+  relay-image.yml      builds, smoke-tests and pushes the relay's image when relay/ changes
 ```
 
 The simulation is deterministic and separate from rendering: inputs in, one fixed tick out. That is what makes it testable headless, and it is the shape rollback netcode needs.
@@ -168,27 +167,16 @@ godot --headless --path . --script tools/sim_trace.gd -- trace.txt
 ```
 
 ```bash
-godot --headless --path . --script tools/relay_probe.gd -- 127.0.0.1:24680
+godot --headless --path . --script res://relay/relay_probe.gd -- 127.0.0.1:24680
 ```
 
 ## Relay server
 
-Online games go through a small relay so players behind home routers can connect. The host opens a room and gets a code; friends join with the code; the relay passes each room's packets between its host and clients without reading them. It's the relay's own GDScript (`scripts/relay/`) running on a headless Godot, packaged as a container.
+Online games go through a small relay so players behind home routers can connect: the host opens a room and gets a code, friends join with it, and the relay passes packets between them. It lives in [`relay/`](relay/README.md), which has everything about running, building and checking it.
 
-- **Image:** `ghcr.io/drewburr-labs/saucer-showdown-relay`. Every push to `main` builds it for linux/amd64 and linux/arm64, checks it with `tools/relay_probe.gd`, and tags it `latest` and `sha-<commit>`.
-- **Run it:** `docker run -p 24680:24680/udp ghcr.io/drewburr-labs/saucer-showdown-relay`. It needs **UDP** port 24680 reachable from the internet (an HTTP proxy or tunnel won't carry it). It's stateless and logs to stdout; an idle relay uses well under 1% of a core and about 35 MB.
-- **Address:** the game connects to `saucer.drewburr.com:24680` (`HOST_NAME` and `PORT` in `scripts/net/relay_protocol.gd`).
-- **Check a deployment:** `godot --headless --path . --script tools/relay_probe.gd -- saucer.drewburr.com` opens a room, joins it and passes a packet each way.
-- **Limits:** 8 machines per room (the host plus 7 friends; with couch players on some of them, that easily fills a 4v4), 400 rooms, 1024 connections; 20 wrong room codes per address per minute.
-- **Compatibility:** the relay doesn't read game messages, so it only needs redeploying when `VERSION` in `relay_protocol.gd` changes. A game with a different `VERSION` is told to update.
-
-```bash
-docker build -t saucer-showdown-relay .
-```
-
-```bash
-docker run --rm -p 24680:24680/udp saucer-showdown-relay
-```
+- **Image:** `ghcr.io/drewburr-labs/saucer-showdown-relay`, rebuilt by CI only when something in `relay/` changes.
+- **Run it:** `docker run -p 24680:24680/udp ghcr.io/drewburr-labs/saucer-showdown-relay` (UDP must be reachable).
+- **Address:** the game connects to `saucer.drewburr.com:24680`.
 
 ## Releases and updates
 
