@@ -13,6 +13,7 @@ const RelayServer = preload("res://relay/relay_server.gd")
 const RelayClient = preload("res://relay/relay_client.gd")
 const RP = preload("res://relay/relay_protocol.gd")
 const LocalInput = preload("res://scripts/input/local_input.gd")
+const InputFrame = preload("res://scripts/sim/input_frame.gd")
 
 const PORT := 24690
 
@@ -52,6 +53,15 @@ class ScriptedInput extends LocalInput:
 		return s
 
 
+## kb2 holds right + jump + Enter; nothing else is pressed.
+class TwoDevices extends LocalInput:
+	func _read(device: String) -> Dictionary:
+		var s := _blank()
+		if device == "kb2":
+			s.merge({"move": Vector2.RIGHT, "jump": true, "swap": true, "join": true}, true)
+		return s
+
+
 var _failed := 0
 var _current := ""
 
@@ -69,6 +79,21 @@ func _run() -> void:
 	await _settle()
 	_check(solo.in_match and solo.sim.greys_per_team == 2 and not solo._menu.is_open(), "Play local should start a 3v3 with the menus out of the way")
 	_check(solo.humans.size() == 1, "player 1 should have a seat")
+	_report()
+
+	_current = "2nd player off: every device drives player 1"
+	var two := TwoDevices.new()
+	two.poll()
+	var U := InputFrame.UNIT_BYTES
+	var both := two.packet(false)
+	_check(both[U + 4] & InputFrame.JOIN != 0 and both.decode_s8(U) == 127, "with a 2nd player allowed, kb2 sends its own input and can join")
+	var one := two.packet(true)
+	_check(one.decode_s8(0) == 127 and one[4] & InputFrame.JUMP != 0, "solo, kb2's move and jump should drive player 1")
+	var joins := false
+	for i in range(1, LocalInput.DEVICES.size()):
+		joins = joins or one[i * U + 4] != 0 or one.decode_s8(i * U) != 0
+	_check(not joins, "solo, no other device should send input or a join")
+	_check(one[4] & InputFrame.JOIN == 0, "kb2's Enter shouldn't turn into a join for player 1")
 	_report()
 
 	_current = "offline win: banner, score, next map"

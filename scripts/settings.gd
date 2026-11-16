@@ -23,6 +23,7 @@ const DEFAULTS := {
 	"vsync": true,
 	"max_fps": 0,
 	"show_fps": false,
+	"extra_players": false, # more players at this machine can join with Enter or Start
 }
 
 ## Rebindable keyboard actions, in the order the controls page lists them.

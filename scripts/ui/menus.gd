@@ -26,6 +26,7 @@ var _version: Label
 var _local_btns: Array[Button] = []
 var _local_greys := 1
 var _local_blurb: Label
+var _p2_btns: Array[Button] = [] # the "2nd player" toggles, on the local and lobby pages
 var _online_name: LineEdit
 var _code: LineEdit
 var _host_btn: Button
@@ -198,8 +199,10 @@ func _refresh() -> void:
 			var status: String = up.status_text() if up != null else ""
 			_version.text = (up.version if up != null else "") + ("   ·   " + status if status != "" else "")
 		"local":
-			_local_blurb.text = "You're Player 1 on %s, on the first keyboard. Player 2 joins with %s and gamepads with Start, at any time. Bots fill every other seat. Best of 3 maps." % [
-					Cfg.TEAM_NAMES[0], OS.get_keycode_string(Settings.keys("kb2", "swap")[0])]
+			var who := "Player 2 joins with %s and gamepads with Start, at any time." % _p2_key() \
+					if Settings.value("extra_players") else "Any keyboard or gamepad plays as you."
+			_local_blurb.text = "You're Player 1 on %s. %s Bots fill every other seat. Best of 3 maps." % [
+					Cfg.TEAM_NAMES[0], who]
 			for i in _local_btns.size():
 				_local_btns[i].set_pressed_no_signal(game.TEAM_SIZES[i] == _local_greys)
 		"online":
@@ -208,6 +211,12 @@ func _refresh() -> void:
 			_refresh_lobby()
 		"pause":
 			_refresh_pause()
+	var on: bool = Settings.value("extra_players")
+	for b in _p2_btns:
+		b.set_pressed_no_signal(on)
+		b.text = "2nd player: On" if on else "2nd player: Off"
+		b.tooltip_text = ("Player 2 joins with %s, gamepads with Start. Click to turn off." % _p2_key()) if on \
+				else "Only you play at this machine; every keyboard and gamepad controls you. Click to let a 2nd player join."
 	var show_toast: bool = game.notice_t > 0.0 and game.notice != ""
 	_toast.visible = show_toast
 	if show_toast:
@@ -282,6 +291,9 @@ func _build_local() -> void:
 		_local_btns.append(b)
 	_local_blurb = UI.label("", 16, UI.DIM, true)
 	box.add_child(_local_blurb)
+	var p2 := _p2_toggle()
+	p2.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	box.add_child(p2)
 	box.add_child(UI.spacer(4))
 	var start := UI.big_button("Start match", func() -> void: game.start_local(_local_greys))
 	start.size_flags_horizontal = Control.SIZE_FILL
@@ -443,6 +455,7 @@ func _build_lobby() -> void:
 		game.leave())
 	bottom.add_child(leave)
 	bottom.add_child(UI.button("Settings", func() -> void: _open_settings("lobby")))
+	bottom.add_child(_p2_toggle())
 	var gap2 := Control.new()
 	gap2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bottom.add_child(gap2)
@@ -531,6 +544,21 @@ func _refresh_lobby() -> void:
 			shown += 1
 		for k in range(shown, per_team):
 			list.add_child(_open_row())
+
+
+## A button that lets (or stops) a second player at this machine joining.
+## Off, every keyboard and gamepad here drives the one player.
+func _p2_toggle() -> Button:
+	var b := UI.button("")
+	b.toggle_mode = true
+	b.custom_minimum_size.x = 190
+	b.toggled.connect(func(on: bool) -> void: Settings.set_value("extra_players", on))
+	_p2_btns.append(b)
+	return b
+
+
+func _p2_key() -> String:
+	return OS.get_keycode_string(Settings.keys("kb2", "swap")[0])
 
 
 func _player_row(e: Dictionary, mine: bool, is_host: bool, team: int) -> Control:

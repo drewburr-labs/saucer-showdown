@@ -296,7 +296,8 @@ func _host_address() -> String:
 
 # --- Matches -------------------------------------------------------------
 
-## Play on this machine against bots; more local players join with Enter or Start.
+## Play on this machine against bots; with "extra_players" on, more local
+## players join with Enter or Start.
 func start_local(greys: int) -> void:
 	if role != Role.OFFLINE:
 		leave()
@@ -696,7 +697,7 @@ func _check_win() -> void:
 
 
 func _local_packet() -> PackedByteArray:
-	return LocalInput.blank_packet() if _menu.is_open() else _input.packet()
+	return LocalInput.blank_packet() if _menu.is_open() else _input.packet(not Settings.value("extra_players"))
 
 
 func _wants_next() -> bool:

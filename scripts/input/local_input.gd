@@ -37,15 +37,38 @@ func pressed(device: String, key: String) -> bool:
 	return _cur[device][key] and not _prev[device][key]
 
 
-## This tick's state of every device, packed for the host.
-func packet() -> PackedByteArray:
+## This tick's state of every device, packed for the host. With `solo`,
+## nobody else at this machine can join: every device drives the first
+## keyboard's seat, so a stray Enter or gamepad press can't add a player.
+func packet(solo := false) -> PackedByteArray:
 	var p := blank_packet()
+	if solo:
+		_put(p, 0, _merged(), _cur[DEVICES[0]]["join"])
+		return p
 	for i in DEVICES.size():
 		var s: Dictionary = _cur[DEVICES[i]]
-		InputFrame.put(p, i, s)
-		var o := i * InputFrame.UNIT_BYTES + 4
-		p[o] = p[o] | (InputFrame.SWAP if s["swap"] else 0) | (InputFrame.JOIN if s["join"] else 0)
+		_put(p, i, s, s["join"])
 	return p
+
+
+func _put(p: PackedByteArray, i: int, s: Dictionary, join: bool) -> void:
+	InputFrame.put(p, i, s)
+	var o := i * InputFrame.UNIT_BYTES + 4
+	p[o] = p[o] | (InputFrame.SWAP if s["swap"] else 0) | (InputFrame.JOIN if join else 0)
+
+
+## Every device's state as one player's: sticks add up, buttons combine.
+func _merged() -> Dictionary:
+	var out := _blank()
+	for d in DEVICES:
+		var s: Dictionary = _cur[d]
+		out["move"] += s["move"]
+		if out["aim"] == Vector2.ZERO:
+			out["aim"] = s["aim"]
+		for k in ["jump", "action", "beam", "swap"]:
+			out[k] = out[k] or s[k]
+	out["move"] = out["move"].limit_length(1.0)
+	return out
 
 
 static func blank_packet() -> PackedByteArray:

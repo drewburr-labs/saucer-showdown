@@ -20,6 +20,7 @@ The game opens on the home screen, with bots playing behind it:
 
 - **Play online** hosts a room or joins one by its code (see [Play online](#play-online)).
 - **Play local** picks a team size (2v2, 3v3 or 4v4) and starts a match on this machine.
+- **2nd player** (on the local setup screen and in the online lobby) lets more players at this machine join. It's off by default, so a stray Enter or gamepad press can't add a player: while it's off, every keyboard and gamepad controls Player 1. The choice is saved.
 - **Settings** has sound (master, music and effects volume, mute), display (windowed or fullscreen, resolution, frame rate limit, VSync, a frame rate counter) and controls (rebind either keyboard player's keys). Settings are saved in `user://settings.cfg`. There is no audio yet, so the volume settings are ready for when there is.
 
 When a match is decided, everyone goes back to the lobby (online) or the local setup screen, after a key press or 10 seconds.
@@ -39,8 +40,8 @@ A match is best of 3 maps.
 | | Move | Jump | Fire / use | Tractor beam | Switch unit | Join |
 | --- | --- | --- | --- | --- | --- | --- |
 | Player 1 | WASD | Space | J | K | Q | always in |
-| Player 2 | Arrows | Up | . | / | Enter | Enter |
-| Gamepad | Stick / D-pad | A | X | B | Y | Start |
+| Player 2 | Arrows | Up | . | / | Enter | Enter (with 2nd player on) |
+| Gamepad | Stick / D-pad | A | X | B | Y | Start (with 2nd player on) |
 
 - **Overlord (saucer):** flies freely. Fire shoots where you're moving. Hold the beam over a cow or a teammate to lift it, and fly it wherever you like; you're slow while beaming. Touch a Probe Station to claim it.
 - **Grey:** runs and jumps; down + jump drops through a platform. Touching a cow picks it up. Carry it to your silo ledge to bank it. Press use next to the tractor to ride it (use or jump to hop off).
@@ -59,7 +60,7 @@ Pick **Play online** and type your name. One player picks **Host a game** and ge
 
 Everyone lands in the **lobby**, which shows the room code and who is on which team. Newcomers go on the smaller team; anyone can switch to a team with an open seat, and rename themselves. The host picks 2v2, 3v3 or 4v4 and starts the match. A room holds as many players as the team size has seats (4, 6 or 8); anyone who tries to join a full room is told so, and the lobby says when it's full. The host can't pick a size too small for the players already in.
 
-In the match, each machine's first keyboard plays the seat its player picked; anyone else at that machine joins with Enter or Start, just like couch play. Bots fill every empty seat, and take over when someone leaves. Someone who joins while a match is on goes straight into a free seat. When the match is decided, everyone goes back to the lobby.
+In the match, each machine's first keyboard plays the seat its player picked; with **2nd player** turned on in the lobby, anyone else at that machine joins with Enter or Start, just like couch play. Bots fill every empty seat, and take over when someone leaves. Someone who joins while a match is on goes straight into a free seat. When the match is decided, everyone goes back to the lobby.
 
 - Everyone needs the same build; a mismatched one is turned away with the two versions named.
 - Only the host can pause (opening the menu with Esc pauses everyone), end the match, or change the team size. Anyone can move the win banner on.
