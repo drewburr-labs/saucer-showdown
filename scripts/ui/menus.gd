@@ -1,8 +1,8 @@
 extends CanvasLayer
 ## Every screen outside the arena: home, local setup, play online, the online
-## lobby, the in-game menu (Esc) and settings. Main decides what the game is
+## lobby, the in-game menu and settings. Main decides what the game is
 ## doing and this follows along: during a match the menus stay hidden until
-## Esc, while in a room they show the lobby, and otherwise the home screen.
+## Esc or Start, while in a room they show the lobby, and otherwise the home screen.
 ## Bots play a match behind them.
 
 const Cfg = preload("res://scripts/sim/config.gd")
@@ -166,10 +166,19 @@ func _unhandled_input(event: InputEvent) -> void:
 	if key != null and key.pressed and not key.echo and key.physical_keycode == KEY_ESCAPE:
 		_escape()
 		get_viewport().set_input_as_handled()
+	elif _is_start(event) and _page in ["", "pause"]:
+		# Gamepad Start opens and closes the in-game menu, like Esc.
+		_escape()
+		get_viewport().set_input_as_handled()
 	elif is_open() and event.is_action_pressed("ui_cancel"):
 		# Gamepad B; Esc is handled above.
 		_escape()
 		get_viewport().set_input_as_handled()
+
+
+static func _is_start(event: InputEvent) -> bool:
+	var pad := event as InputEventJoypadButton
+	return pad != null and pad.pressed and pad.button_index == JOY_BUTTON_START
 
 
 func _escape() -> void:
@@ -199,7 +208,7 @@ func _refresh() -> void:
 			var status: String = up.status_text() if up != null else ""
 			_version.text = (up.version if up != null else "") + ("   ·   " + status if status != "" else "")
 		"local":
-			var who := "Player 2 joins with %s and gamepads with Start, at any time." % _p2_key() \
+			var who := "Player 2 joins with %s and gamepads with A, at any time." % _p2_key() \
 					if Settings.value("extra_players") else "Any keyboard or gamepad plays as you."
 			_local_blurb.text = "You're Player 1 on %s. %s Bots fill every other seat. Best of 3 maps." % [
 					Cfg.TEAM_NAMES[0], who]
@@ -215,7 +224,7 @@ func _refresh() -> void:
 	for b in _p2_btns:
 		b.set_pressed_no_signal(on)
 		b.text = "2nd player: On" if on else "2nd player: Off"
-		b.tooltip_text = ("Player 2 joins with %s, gamepads with Start. Click to turn off." % _p2_key()) if on \
+		b.tooltip_text = ("Player 2 joins with %s, gamepads with A. Click to turn off." % _p2_key()) if on \
 				else "Only you play at this machine; every keyboard and gamepad controls you. Click to let a 2nd player join."
 	var show_toast: bool = game.notice_t > 0.0 and game.notice != ""
 	_toast.visible = show_toast

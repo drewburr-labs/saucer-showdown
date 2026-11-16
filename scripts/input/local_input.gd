@@ -121,7 +121,7 @@ func _pad(id: int) -> Dictionary:
 	s["action"] = Input.is_joy_button_pressed(id, JOY_BUTTON_X) or Input.get_joy_axis(id, JOY_AXIS_TRIGGER_RIGHT) > 0.5
 	s["beam"] = Input.is_joy_button_pressed(id, JOY_BUTTON_B) or Input.is_joy_button_pressed(id, JOY_BUTTON_RIGHT_SHOULDER)
 	s["swap"] = Input.is_joy_button_pressed(id, JOY_BUTTON_Y)
-	s["join"] = Input.is_joy_button_pressed(id, JOY_BUTTON_START) or s["jump"]
+	s["join"] = s["jump"] # Start is pause, handled by the menus
 	return s
 
 

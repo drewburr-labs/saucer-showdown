@@ -13,7 +13,7 @@ const BAR_H := 62.0
 const HELP := [
 	["P1", "WASD move  ·  Space jump  ·  J fire / use  ·  K tractor beam  ·  Q switch unit"],
 	["P2", "Arrows move  ·  Up jump  ·  . fire / use  ·  / tractor beam  ·  Enter join / switch unit"],
-	["Pad", "Stick move  ·  A jump  ·  X fire / use  ·  B tractor beam  ·  Y switch unit  ·  Start join"],
+	["Pad", "Stick move  ·  A jump / join  ·  X fire / use  ·  B tractor beam  ·  Y switch unit  ·  Start menu"],
 	["", ""],
 	["", "Overlord (saucer): flies, shoots, beams cows or teammates, claims Probe Stations by touch."],
 	["", "Grey: carries cows. Use next to the tractor to ride it. Down + jump drops through a platform."],

@@ -294,7 +294,7 @@ func _host_address() -> String:
 # --- Matches -------------------------------------------------------------
 
 ## Play on this machine against bots; with "extra_players" on, more local
-## players join with Enter or Start.
+## players join with Enter or A.
 func start_local(greys: int) -> void:
 	if role != Role.OFFLINE:
 		leave()

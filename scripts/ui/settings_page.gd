@@ -170,7 +170,7 @@ func _controls_tab() -> Control:
 			_key_btns[id] = b
 	_bind_note = UI.label("", 15, Color(1, 1, 1, 0.5), true)
 	box.add_child(_bind_note)
-	box.add_child(UI.label("Gamepad: stick or d-pad move · A jump · X fire / use · B beam · Y switch unit · Start join", 15, Color(1, 1, 1, 0.5), true))
+	box.add_child(UI.label("Gamepad: stick or d-pad move · A jump / join · X fire / use · B beam · Y switch unit · Start menu", 15, Color(1, 1, 1, 0.5), true))
 	var reset := UI.button("Reset to defaults", func() -> void:
 		Settings.reset_keys()
 		_rebinding = ""
