@@ -16,6 +16,14 @@ godot --path .
 
 Or open the folder in the Godot editor and press F5.
 
+The game opens on the home screen, with bots playing behind it:
+
+- **Play online** hosts a room or joins one by its code (see [Play online](#play-online)).
+- **Play local** picks a team size (2v2, 3v3 or 4v4) and starts a match on this machine.
+- **Settings** has sound (master, music and effects volume, mute), display (windowed or fullscreen, resolution, frame rate limit, VSync, a frame rate counter) and controls (rebind either keyboard player's keys). Settings are saved in `user://settings.cfg`. There is no audio yet, so the volume settings are ready for when there is.
+
+When a match is decided, everyone goes back to the lobby (online) or the local setup screen, after a key press or 10 seconds.
+
 ## How to win a map
 
 | Win | Goal |
@@ -43,24 +51,29 @@ A match is best of 3 maps.
 - **Saucer damage:** a saucer takes 3 hits to bring down. It smokes after one and sparks after two; the bar beside its lives shows what's left. A fresh saucer is back to full.
 - **Saucer wrecks:** a downed saucer stays where it falls as a platform until its Overlord respawns.
 
-Other keys: F1 controls, F2 team size (2v2 or 4v4), F3 hand Player 1's seat to a bot and watch, F5 check for an update (and install it when one is offered), F6 play online, R restart, Esc pause.
+Other keys: Esc opens the in-game menu (resume, restart, settings, back to the lobby or home), F1 controls, F3 hand Player 1's seat to a bot and watch (local games), F5 check for an update (and install it when one is offered). Keyboard keys can be changed in Settings.
 
 ## Play online
 
-Press **F6**. One player picks **Host a game** and gets a five-letter room code; friends type it into **Join**. Games go through the Saucer Showdown relay server (`saucer.drewburr.com`), so nobody has to forward ports. Each machine's first keyboard takes a seat straight away and goes on the smaller team; anyone else at that machine joins with Enter or Start, just like couch play. Bots fill every empty seat, and take over when someone leaves. Players can join a match already in progress.
+Pick **Play online** and type your name. One player picks **Host a game** and gets a five-letter room code; friends type it in and press **Join**. Games go through the Saucer Showdown relay server (`saucer.drewburr.com`), so nobody has to forward ports.
+
+Everyone lands in the **lobby**, which shows the room code and who is on which team. Newcomers go on the smaller team; anyone can switch to a team with an open seat, and rename themselves. The host picks 2v2, 3v3 or 4v4 and starts the match. A room holds as many players as the team size has seats (4, 6 or 8); anyone who tries to join a full room is told so, and the lobby says when it's full. The host can't pick a size too small for the players already in.
+
+In the match, each machine's first keyboard plays the seat its player picked; anyone else at that machine joins with Enter or Start, just like couch play. Bots fill every empty seat, and take over when someone leaves. Someone who joins while a match is on goes straight into a free seat. When the match is decided, everyone goes back to the lobby.
 
 - Everyone needs the same build; a mismatched one is turned away with the two versions named.
-- Only the host can pause, restart, or change the team size. Anyone can move the win banner on.
+- Only the host can pause (opening the menu with Esc pauses everyone), end the match, or change the team size. Anyone can move the win banner on.
 - Online play uses rollback netcode: your own moves show at once (after 2 ticks, about 33 ms, of input delay) and other players' are predicted, then corrected when their real input arrives. A correction can make a remote player jump a little. The game only waits ("Waiting for players…") if a connection falls more than 200 ms behind.
 - The ping shown is the real round trip to the host, through the relay.
-- From the command line (after `--`): `--join=CODE` joins a room; `--relay=HOST[:PORT]` uses a different relay (say, one running locally); `--lag=MS` delays every packet this machine sends, to fake a slow connection.
+- From the command line (after `--`): `--join=CODE` joins a room; `--relay=HOST[:PORT]` uses a different relay (say, one running locally); `--lag=MS` delays every packet this machine sends, to fake a slow connection; `--local[=GREYS]` skips the menus and starts a local match (1, 2 or 3 greys a team).
 - Direct play without the relay, for a LAN or development: `--host` (with `--port=N`) hosts on this machine, and `--join=ADDRESS[:PORT]` joins it. The host needs UDP port 24680 reachable.
 
 ## Layout
 
 ```
 scripts/
-  main.gd              game shell: seats, score, fixed-tick loop
+  main.gd              game shell: menus or match, lobby, seats, score, fixed-tick loop
+  settings.gd          saved settings (name, sound, display, key bindings) and applying them
   sim/                 the whole game, with no nodes or rendering
     config.gd          every tuning number
     map_data.gd        the night-farm map and the bots' platform graph
@@ -76,19 +89,23 @@ scripts/
   view/
     arena_view.gd      draws the arena from sim state: sprites, animation, particles, glow
     hud.gd             top bar, win banner, controls overlay, online status
-    online_menu.gd     the F6 host / join panel
     art.gd             loads and team-colours the sprites, and the fonts
+  ui/
+    menus.gd           home, local setup, play online, the lobby, the in-game menu
+    settings_page.gd   the sound / display / controls tabs
+    ui_kit.gd          the menus' theme and widget builders
 assets/
   sprites/             SVG art, one file per sprite
   fonts/               Lilita One and Fredoka (SIL Open Font License)
 tools/
   screenshot.gd        runs the game and saves screenshots
+  menu_shots.gd        saves a screenshot of every menu page
   sprite_sheet.gd      saves every sprite, in both team colours, on one sheet
   sim_trace.gd         plays fixed matches and writes the sim's checksums
 tests/
   test_sim.gd          headless tests for every rule and win condition
   test_updater.gd      headless tests for version ordering and asset choice
-  test_net.gd          host and clients over loopback (and with fake lag), checked tick by tick
+  test_net.gd          host and clients over loopback (and with fake lag), checked tick by tick; the lobby
   bot_stats.gd         balance probe: how bot-only matches end
 relay/                 the relay server and its Docker image (see relay/README.md)
   relay_server.gd      rooms, codes, forwarding
@@ -144,6 +161,10 @@ godot --headless --path . --script tools/sprite_sheet.gd -- sprites.png
 godot --path . --script tools/screenshot.gd -- shots 3 12 30
 ```
 
+```bash
+godot --path . --script tools/menu_shots.gd -- shots
+```
+
 ## Tests
 
 ```bash
@@ -196,6 +217,6 @@ To rehearse an update against a local feed, debug exports accept `-- --update-fe
 
 - Bot balance: since saucers take 3 hits, bot-only matches mostly end in Economic wins after roughly 2–3 minutes, still short of the 3–5 minute target.
 - The Windows half of the updater has not been run on Windows yet.
-- No audio and no main menu. The art is a first pass, not final.
+- No audio yet (the volume settings are wired up for when there is). The art is a first pass, not final.
 - Online: all games go through the one relay, so players far from it get a longer ping. There's no matchmaking: you share a room code.
 - Online: a rollback correction moves remote players instantly instead of smoothing them into place, and an effect from a wrong prediction (say, a hit that didn't happen) stays on screen.
