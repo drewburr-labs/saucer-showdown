@@ -45,8 +45,35 @@ func _init() -> void:
 	_check(Updater.pick_asset(assets, "macos").is_empty(), "no macOS asset")
 	_check(Updater.pick_asset([], "linux").is_empty(), "empty release")
 
+	_test_retry()
+
 	print("ALL TESTS PASSED" if _failed == 0 else "%d FAILED" % _failed)
 	quit(1 if _failed > 0 else 0)
+
+
+## F5 after a failure asks again, but not within RETRY_MS of the failure.
+func _test_retry() -> void:
+	var up := Updater.new() # not in the tree: these paths never reach the network
+	up.state = Updater.State.FAILED
+	up.error = "no linux build in release v0.2.0"
+	_check(up.status_text().contains("F5 to retry"), "a failure offers a retry")
+	up._failed_at = Time.get_ticks_msec()
+	up.install()
+	_check(up.state == Updater.State.FAILED and up.status_text().contains(up.error),
+			"F5 right after a failure keeps showing it")
+	up._failed_at = Time.get_ticks_msec() - Updater.RETRY_MS - 1
+	up.install()
+	_check(up.state != Updater.State.FAILED and up._retry, "F5 a moment after a failure retries")
+
+	up.state = Updater.State.IDLE
+	up._note = ""
+	up._failed_at = Time.get_ticks_msec()
+	up.install()
+	_check(up._note == "", "F5 right after a failed check doesn't ask again")
+	up._failed_at = Time.get_ticks_msec() - Updater.RETRY_MS - 1
+	up.install()
+	_check(up._note != "", "F5 a moment after a failed check asks again")
+	up.free()
 
 
 func _check(ok: bool, what: String) -> void:

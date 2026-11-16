@@ -13,19 +13,22 @@ const EXE_NAMES := {"linux": "saucer-showdown.x86_64", "windows": "saucer-showdo
 const EXEC_PERMISSIONS := 0x1ED # rwxr-xr-x
 ## How long a one-off message ("You're up to date") stays on screen.
 const NOTE_MS := 5000
+## F5 within this long of a failure leaves the failure up rather than asking again.
+const RETRY_MS := 1000
 
 enum State { OFF, CHECKING, IDLE, AVAILABLE, DOWNLOADING, INSTALLING, FAILED }
 
 var state := State.OFF
 var version := DEV_VERSION # the running build
 var latest := "" # tag of the newest release, once known
-var page_url := "https://github.com/%s/releases/latest" % RELEASES_REPO
 var error := ""
 var feed_url := "https://api.github.com/repos/%s/releases/latest" % RELEASES_REPO
 
 var _asset := {} # the release asset for this platform
 var _auto := false
 var _manual := false # the current check was asked for with F5
+var _retry := false # install whatever the current check finds (F5 after a failure)
+var _failed_at := -RETRY_MS * 100 # ticks of the last failed check or install
 var _note := ""
 var _note_until := 0
 var _http: HTTPRequest
@@ -57,20 +60,27 @@ func check() -> void:
 	if not enabled() or state == State.CHECKING or state == State.DOWNLOADING or state == State.INSTALLING:
 		return
 	state = State.CHECKING
+	_http.download_file = "" # a failed install may have left these set for its download
+	_http.timeout = 20.0
 	var headers := ["Accept: application/vnd.github+json", "User-Agent: SaucerShowdown/%s" % version]
 	if _http.request(feed_url, headers) != OK:
 		state = State.IDLE
+		_retry = false
+		_failed_at = Time.get_ticks_msec()
 		if _manual:
 			_manual = false
 			_say("Couldn't start the update check")
 
 
-## Download and install the release found by check(). After a failure, open
-## the release page instead so the player can update by hand.
+## Download and install the release found by check(). After a failure, ask
+## the feed again and install what it finds: a release whose builds were still
+## being uploaded may have them by now.
 func install() -> void:
+	if (state == State.FAILED or state == State.IDLE) and Time.get_ticks_msec() - _failed_at < RETRY_MS:
+		return # it only just failed; asking again this soon would fail the same way
 	if state == State.FAILED:
-		OS.shell_open(page_url)
-		return
+		state = State.IDLE
+		_retry = true
 	if state == State.OFF or state == State.IDLE:
 		# Nothing known to install: F5 asks GitHub again and says what it found.
 		if not enabled():
@@ -119,7 +129,7 @@ func status_text() -> String:
 		State.INSTALLING:
 			return "Installing %s, restarting…" % latest
 		State.FAILED:
-			return "Update failed: %s  ·  F5 opens the download page" % error
+			return "Update failed: %s  ·  F5 to retry" % error
 	return ""
 
 
@@ -198,8 +208,11 @@ func _on_request_completed(result: int, code: int, _headers: PackedStringArray, 
 func _on_checked(result: int, code: int, body: PackedByteArray) -> void:
 	state = State.IDLE
 	var manual := _manual
+	var retry := _retry
 	_manual = false
+	_retry = false
 	if result != HTTPRequest.RESULT_SUCCESS or code != 200:
+		_failed_at = Time.get_ticks_msec()
 		print("Update check failed (result %d, HTTP %d)." % [result, code])
 		if manual:
 			_say("Couldn't check for updates (%s)" % (
@@ -207,6 +220,7 @@ func _on_checked(result: int, code: int, body: PackedByteArray) -> void:
 		return
 	var data = JSON.parse_string(body.get_string_from_utf8())
 	if not data is Dictionary or not data.has("tag_name"):
+		_failed_at = Time.get_ticks_msec()
 		print("Update check failed: unexpected reply.")
 		if manual:
 			_say("Couldn't check for updates (unexpected reply)")
@@ -216,11 +230,10 @@ func _on_checked(result: int, code: int, body: PackedByteArray) -> void:
 		if manual:
 			_say("You're up to date (%s)" % version)
 		return
-	page_url = str(data.get("html_url", page_url))
 	var assets = data.get("assets", [])
 	_asset = pick_asset(assets if assets is Array else [], platform())
 	state = State.AVAILABLE
-	if _auto:
+	if _auto or retry:
 		install()
 
 
@@ -254,6 +267,7 @@ func _say(text: String) -> void:
 func _fail(why: String) -> void:
 	error = why
 	state = State.FAILED
+	_failed_at = Time.get_ticks_msec()
 	push_warning("Update failed: %s" % why)
 
 

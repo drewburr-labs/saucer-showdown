@@ -213,7 +213,7 @@ Publishing a GitHub release runs `.github/workflows/release.yml`. It stamps the 
 
 Use tags like `v0.2.0`. Running the workflow by hand from the Actions tab builds the same zips as an artifact without touching a release.
 
-A released build checks the repo's latest release when it starts, and again whenever you press F5 with nothing to install (the HUD says whether it is up to date). If that tag is newer than its own, the HUD offers the update; F5 then downloads the zip for the platform, checks it against the SHA-256 GitHub publishes for the asset, installs it over the running game and restarts. Pre-releases and drafts are never offered.
+A released build checks the repo's latest release when it starts, and again whenever you press F5 with nothing to install (the HUD says whether it is up to date). If that tag is newer than its own, the HUD offers the update; F5 then downloads the zip for the platform, checks it against the SHA-256 GitHub publishes for the asset, installs it over the running game and restarts. If that fails (say the release's builds are still being uploaded), F5 asks GitHub again and installs whatever it finds. Pre-releases and drafts are never offered.
 
 - The check is off in the editor, in `dev` builds (anything not built by the workflow) and in builds exported with a `steam` feature tag, since Steam updates its own installs.
 - The releases must be publicly readable. While this repo is private the check gets a 404 and stays silent.
