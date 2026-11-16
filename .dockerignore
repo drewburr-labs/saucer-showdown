@@ -1,0 +1,5 @@
+# The relay image only needs the relay's scripts; keep everything else out.
+*
+!project.godot
+!scripts/net/relay_protocol.gd
+!scripts/relay/

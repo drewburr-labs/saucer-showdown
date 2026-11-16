@@ -1,0 +1,104 @@
+name: Relay image
+
+# Builds the relay server's container image (see Dockerfile), checks it with
+# tools/relay_probe.gd, and on main pushes it to GHCR as :latest and
+# :sha-<short>, for linux/amd64 and linux/arm64. Pull requests build and
+# test it without pushing.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: relay-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: 4.7.2
+  IMAGE: ghcr.io/${{ github.repository_owner }}/saucer-showdown-relay
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build for the smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: relay:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Restore Godot
+        id: godot
+        uses: actions/cache@v4
+        with:
+          path: ~/godot
+          key: godot-${{ env.GODOT_VERSION }}-ubuntu-24.04-editor
+
+      - name: Download Godot
+        if: steps.godot.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL -o godot.zip "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          mkdir -p ~/godot
+          unzip -q -j godot.zip -d ~/godot
+          rm godot.zip
+
+      - name: Smoke test the image
+        run: |
+          docker run -d --name relay -p 24680:24680/udp relay:test
+          ~/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64 --headless --path . --import > /dev/null
+          ok=0
+          for i in 1 2 3; do
+            if timeout 30 ~/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64 --headless --path . --script tools/relay_probe.gd -- 127.0.0.1:24680; then
+              ok=1; break
+            fi
+            sleep 2
+          done
+          echo "--- relay log"
+          docker logs relay
+          start=$(date +%s)
+          docker stop relay
+          echo "stopped in $(( $(date +%s) - start )) s"
+          test "$ok" = 1
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short
+
+      - name: Build for amd64 and arm64, and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
