@@ -19,7 +19,7 @@ const REPEAT_MS := 45 # the same effect can't start more often than this
 ## How loud each sound plays, in dB (every file is normalised).
 const GAIN := {
 	"shot_saucer": -11.0, "shot_ray": -12.0, "hit": -5.0, "boom_big": -1.0, "boom_small": -7.0,
-	"jump": -19.0, "land": -22.0, "moo1": -10.0, "moo2": -10.0, "pickup": -14.0,
+	"jump": -19.0, "land": -22.0, "moo1": -6.5, "moo2": -6.0, "pickup": -14.0,
 	"beam_loop": -17.0, "tractor_loop": -15.0, "tractor_start": -11.0, "deposit": -7.0,
 	"heist": -8.0, "powerup": -8.0, "speed": -10.0, "probe": -9.0, "claim": -8.0,
 	"respawn_saucer": -12.0, "respawn_grey": -18.0, "ui_move": -16.0, "ui_click": -11.0,

@@ -108,24 +108,35 @@ func _land() -> void:
 
 
 func _moo1() -> void:
-	_wav("moo1", _moo(0.95, 1.0))
+	_wav("moo1", _moo(1.3, 1.0, 1.0))
 
 
 func _moo2() -> void:
-	_wav("moo2", _moo(1.25, 0.82))
+	_wav("moo2", _moo(1.6, 0.85, 0.75))
 
 
-## A sawtooth voice that swells and sags in pitch, through a mouth that opens
-## from "mm" to "oo".
-func _moo(dur: float, k: float) -> PackedFloat32Array:
-	var v := _tone(_buf(dur + 0.1), 0.0, dur, 1.0, 1.0, W.SAW, 0.8, 0.09, 0.0,
-		{"pts": [[0.0, 135.0 * k], [0.22, 168.0 * k], [0.7, 140.0 * k], [1.0, 108.0 * k]],
-		"vib": [4.5, 0.25], "vib_delay": 0.2, "rel": 0.3})
-	var b := _filt(v.duplicate(), F.BP, 260.0, 620.0, 4.0, 0.35)
-	b = _mix(b, _filt(v.duplicate(), F.BP, 900.0, -1.0, 5.0), 0.35)
-	b = _mix(b, _filt(v, F.LP, 320.0), 0.5)
-	var br := _tone(_buf(dur + 0.1), 0.0, dur, 1.0, 1.0, W.NOISE, 0.04, 0.15, 0.0, {"rel": 0.3})
-	return _mix(b, _filt(br, F.LP, 1400.0))
+## A moo: a growly, nasal voice that starts as a closed-mouth "mm", opens
+## into a "waa" as it swells and rises, then sags and closes. `k` scales the
+## pitch; `open` how wide the mouth gets.
+func _moo(dur: float, k: float, open := 1.0) -> PackedFloat32Array:
+	var pitch := [[0.0, 98.0 * k], [0.14, 142.0 * k], [0.5, 138.0 * k], [0.82, 116.0 * k], [1.0, 88.0 * k]]
+	var o := {"pts": pitch, "vib": [5.0, 0.2], "vib_delay": 0.25, "rel": 0.15, "trem": [27.0, 0.3],
+		"amp_pts": [[0.0, 0.0], [0.1, 0.35], [0.28, 1.0], [0.7, 0.85], [1.0, 0.0]]}
+	var src := _tone(_buf(dur + 0.1), 0.0, dur, 1.0, 1.0, W.SAW, 0.7, 0.01, 0.0, o)
+	# A quieter voice an octave down: the rough, chesty part of a moo.
+	var sub := pitch.map(func(p: Array) -> Array: return [p[0], p[1] * 0.5])
+	var o2 := o.duplicate()
+	o2["pts"] = sub
+	src = _tone(src, 0.0, dur, 1.0, 1.0, W.SAW, 0.18, 0.01, 0.0, o2)
+	src = _filt(src, F.LP, 1600.0) # a voice, not a buzzer: the harmonics fall away
+	var mouth := [[0.0, 300.0], [0.25, 300.0 + 380.0 * open], [0.7, 260.0 + 320.0 * open], [1.0, 320.0]]
+	var f2 := [[0.0, 750.0], [0.25, 750.0 + 380.0 * open], [0.7, 700.0 + 300.0 * open], [1.0, 780.0]]
+	var b := _filt(src.duplicate(), F.BP, 0.0, -1.0, 3.0, -1.0, mouth)
+	b = _mix(b, _filt(src.duplicate(), F.BP, 0.0, -1.0, 4.0, -1.0, f2), 0.45)
+	b = _mix(b, _filt(src, F.LP, 280.0), 0.6) # the "mm" through the nose
+	b = _filt(_filt(b, F.LP, 2200.0), F.LP, 2200.0)
+	var br := _tone(_buf(dur + 0.1), 0.0, dur, 1.0, 1.0, W.NOISE, 0.02, 0.2, 0.0, {"rel": 0.3})
+	return _mix(b, _filt(br, F.BP, 900.0, -1.0, 1.0))
 
 
 func _pickup() -> void:
@@ -503,9 +514,10 @@ func _hz(m: int) -> float:
 ## Adds an oscillator to `b`: `f0` gliding to `f1` Hz over `dur` seconds from
 ## `t0`, shaped by a linear attack and an exponential decay (0 = sustain).
 ## Options: "curve" glide shape, "glide_t" glide over this long and then hold,
-## "pts" [[fraction, hz], ...] pitch contour instead, "vib" [rate, semitones]
-## and "vib_delay", "trem" [rate, depth], "pw" pulse width, "rel" fade at the
-## end, "phase" start phase.
+## "pts" [[fraction, hz], ...] pitch contour instead, "amp_pts" [[fraction,
+## level], ...] loudness contour, "vib" [rate, semitones] and "vib_delay",
+## "trem" [rate, depth], "pw" pulse width, "rel" fade at the end, "phase" start
+## phase.
 func _tone(b: PackedFloat32Array, t0: float, dur: float, f0: float, f1: float, w: int, amp: float,
 		att := 0.005, dec := 0.0, o := {}) -> PackedFloat32Array:
 	var i0 := int(t0 * SR)
@@ -522,6 +534,7 @@ func _tone(b: PackedFloat32Array, t0: float, dur: float, f0: float, f1: float, w
 	var glide_t: float = o.get("glide_t", dur)
 	var rel: float = o.get("rel", minf(0.02, dur * 0.5))
 	var pts: Array = o.get("pts", [])
+	var amp_pts: Array = o.get("amp_pts", [])
 	var ph: float = o.get("phase", 0.0)
 	var glide := f1 != f0
 	var ratio := f1 / f0
@@ -530,14 +543,7 @@ func _tone(b: PackedFloat32Array, t0: float, dur: float, f0: float, f1: float, w
 		var t := float(i) / SR
 		var f := f0
 		if not pts.is_empty():
-			var x := t / dur
-			var k := 1
-			while k < pts.size() - 1 and pts[k][0] < x:
-				k += 1
-			var a: Array = pts[k - 1]
-			var c: Array = pts[k]
-			var u := clampf((x - a[0]) / (c[0] - a[0]), 0.0, 1.0)
-			f = a[1] * pow(c[1] / a[1], u)
+			f = _contour(pts, t / dur, true)
 		elif glide:
 			f = f0 * pow(ratio, pow(minf(t / glide_t, 1.0), curve))
 		if vib_depth > 0.0 and t > vib_delay:
@@ -559,6 +565,8 @@ func _tone(b: PackedFloat32Array, t0: float, dur: float, f0: float, f1: float, w
 		var env := 1.0 if t >= att_s else t / att_s
 		if dec > 0.0 and t > att_s:
 			env *= exp(-(t - att_s) / dec)
+		if not amp_pts.is_empty():
+			env *= _contour(amp_pts, t / dur, false)
 		if trem_depth > 0.0:
 			env *= 1.0 - trem_depth * (0.5 - 0.5 * cos(TAU * trem_rate * t))
 		var left := dur - t
@@ -566,6 +574,18 @@ func _tone(b: PackedFloat32Array, t0: float, dur: float, f0: float, f1: float, w
 			env *= left / rel
 		b[i0 + i] += s * env * amp
 	return b
+
+
+## The value of a [[fraction, value], ...] contour at fraction `x`, eased
+## exponentially between points (for pitches and cutoffs) or linearly.
+func _contour(pts: Array, x: float, expo: bool) -> float:
+	var k := 1
+	while k < pts.size() - 1 and pts[k][0] < x:
+		k += 1
+	var a: Array = pts[k - 1]
+	var c: Array = pts[k]
+	var u := clampf((x - a[0]) / (c[0] - a[0]), 0.0, 1.0)
+	return a[1] * pow(c[1] / a[1], u) if expo else lerpf(a[1], c[1], u)
 
 
 ## Smooths the corners of a saw or square so high notes don't alias.
@@ -580,10 +600,12 @@ func _blep(t: float, dt: float) -> float:
 
 
 ## A state-variable filter over `b`; the cutoff sweeps from c0 to c1 Hz over
-## `sweep` seconds (or the whole buffer) and then holds.
-func _filt(b: PackedFloat32Array, mode: int, c0: float, c1 := -1.0, q := 0.707, sweep := -1.0) -> PackedFloat32Array:
+## `sweep` seconds (or the whole buffer) and then holds. Or it follows `pts`,
+## a [[fraction, hz], ...] contour over the whole buffer.
+func _filt(b: PackedFloat32Array, mode: int, c0: float, c1 := -1.0, q := 0.707, sweep := -1.0, pts := []) -> PackedFloat32Array:
 	if c1 <= 0.0:
 		c1 = c0
+	var moving := c1 != c0 or not pts.is_empty()
 	var n := b.size()
 	var sn := float(n) if sweep <= 0.0 else sweep * SR
 	var k := 1.0 / q
@@ -593,8 +615,9 @@ func _filt(b: PackedFloat32Array, mode: int, c0: float, c1 := -1.0, q := 0.707, 
 	var a2 := 0.0
 	var a3 := 0.0
 	for i in n:
-		if i == 0 or (c1 != c0 and i % 16 == 0 and i <= sn + 16):
-			var fc := clampf(c0 * pow(c1 / c0, minf(i / sn, 1.0)), 10.0, SR * 0.45)
+		if i == 0 or (moving and i % 16 == 0 and i <= sn + 16):
+			var fc := c0 * pow(c1 / c0, minf(i / sn, 1.0)) if pts.is_empty() else _contour(pts, i / sn, true)
+			fc = clampf(fc, 10.0, SR * 0.45)
 			var g := tan(PI * fc / SR)
 			a1 = 1.0 / (1.0 + g * (g + k))
 			a2 = g * a1
