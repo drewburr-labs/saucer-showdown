@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 #
 # The Saucer Showdown relay server: lets players behind home routers play
-# online without port forwarding. It listens on UDP 24680.
+# online without port forwarding, for Saucer Showdown or any other game (see
+# README.md). It listens on UDP 24680.
 #
 #   docker build -t saucer-showdown-relay relay
 #   docker run -p 24680:24680/udp saucer-showdown-relay
@@ -48,7 +49,7 @@ RUN set -eu; \
 
 FROM debian:bookworm-slim
 LABEL org.opencontainers.image.title="Saucer Showdown relay" \
-	org.opencontainers.image.description="Relay server for Saucer Showdown online play (UDP 24680)" \
+	org.opencontainers.image.description="Room-code relay for online games, Saucer Showdown's and any other (UDP 24680)" \
 	org.opencontainers.image.source="https://github.com/drewburr-labs/saucer-showdown"
 COPY --from=godot /godot /usr/local/bin/godot
 COPY --from=godot /tini /usr/local/bin/tini

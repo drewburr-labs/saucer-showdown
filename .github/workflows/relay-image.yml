@@ -6,7 +6,8 @@ name: Relay image
 # test it without pushing.
 #
 # It only runs when relay/ changes (everything in the image comes from
-# there), or this file, which decides how the image is built. "Run workflow"
+# there; relay/example/ isn't in it), or this file, which decides how the
+# image is built. "Run workflow"
 # rebuilds by hand, say for a newer base image.
 
 on:
@@ -14,10 +15,12 @@ on:
     branches: [main]
     paths:
       - "relay/**"
+      - "!relay/example/**"
       - ".github/workflows/relay-image.yml"
   pull_request:
     paths:
       - "relay/**"
+      - "!relay/example/**"
       - ".github/workflows/relay-image.yml"
   workflow_dispatch:
 

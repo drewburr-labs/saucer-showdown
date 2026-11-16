@@ -17,7 +17,7 @@ Godot 4.7 (standard build, GL Compatibility) team arcade brawler. See README.md 
 - `scripts/sim/` is the whole game as a deterministic simulation with no nodes or rendering. Keep it that way: rendering must never feed back into the sim.
 - `scripts/ui/` is the menus (home, settings, online lobby, in-game menu); they only call into `main.gd`. Player settings live in `scripts/settings.gd`.
 - `scripts/view/` draws the sim's state each frame. `art.gd` loads the SVG sprites in `assets/sprites/` and recolours magenta placeholders (`#ff00ff`, `#800080`, `#ff80ff`) per team.
-- `relay/` is the relay server and everything its Docker image needs; CI rebuilds the image only when that folder changes. Its scripts load each other by relative path and depend on nothing outside it. The game loads `relay/relay_protocol.gd`, so that file must stay dependency-free, and `relay/` must never get its own `project.godot` (Godot would skip the folder in exports). Bump `VERSION` in `relay_protocol.gd` when the relay's wire format changes.
+- `relay/` is the relay server and everything its Docker image needs; CI rebuilds the image only when that folder changes. Its scripts load each other by relative path and depend on nothing outside it. The game loads `relay/relay_protocol.gd` and `relay/relay_client.gd`, and other games copy them, so they must depend on nothing but each other, and `relay/` must never get its own `project.godot` (Godot would skip the folder in exports). Bump `VERSION` in `relay_protocol.gd` when the relay's wire format changes.
 - SVG sprites are imported as "keep" (each has a `.svg.import` with `importer="keep"`); new sprites need that file too. The SVG renderer ignores `<pattern>` fills.
 
 ## Commands

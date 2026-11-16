@@ -110,6 +110,8 @@ tests/
 relay/                 the relay server and its Docker image (see relay/README.md)
   relay_server.gd      rooms, codes, forwarding
   relay_protocol.gd    the wire format and the relay's address; the game loads it too
+  relay_client.gd      a game's side of the relay: host, join, send; the game uses it too
+  example/chat.gd      the smallest game that uses the relay, for other games to copy
   relay_probe.gd       checks a running relay end to end
 export_presets.cfg     Linux and Windows export settings
 .github/workflows/
@@ -193,7 +195,7 @@ godot --headless --path . --script res://relay/relay_probe.gd -- 127.0.0.1:24680
 
 ## Relay server
 
-Online games go through a small relay so players behind home routers can connect: the host opens a room and gets a code, friends join with it, and the relay passes packets between them. It lives in [`relay/`](relay/README.md), which has everything about running, building and checking it.
+Online games go through a small relay so players behind home routers can connect: the host opens a room and gets a code, friends join with it, and the relay passes packets between them. Other games can use it too, the public one or their own: rooms belong to a game id. It lives in [`relay/`](relay/README.md), which has everything about using, running, building and checking it.
 
 - **Image:** `ghcr.io/drewburr-labs/saucer-showdown-relay`, rebuilt by CI only when something in `relay/` changes.
 - **Run it:** `docker run -p 24680:24680/udp ghcr.io/drewburr-labs/saucer-showdown-relay` (UDP must be reachable).
