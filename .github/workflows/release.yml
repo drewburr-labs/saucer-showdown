@@ -78,6 +78,11 @@ jobs:
       - name: Import the project
         run: ~/godot/godot --headless --path . --import
 
+      # The relay server isn't in this repo; test_net plays through the real one.
+      # It lands in tests/, which the exports leave out.
+      - name: Fetch the relay server
+        run: tools/update_relay.sh --server
+
       - name: Run tests
         run: |
           ~/godot/godot --headless --path . --script tests/test_sim.gd

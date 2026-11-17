@@ -14,6 +14,8 @@ on:
       - "tools/sim_trace.gd"
       - "tests/test_sim.gd"
       - "tests/test_net.gd"
+      - "relay/**"
+      - "tools/update_relay.sh"
       - ".github/workflows/determinism.yml"
   pull_request:
     paths:
@@ -66,6 +68,10 @@ jobs:
 
       - name: Run sim tests
         run: ~/godot/${{ matrix.bin }} --headless --path . --script tests/test_sim.gd
+
+      # The relay server isn't in this repo; test_net plays through the real one.
+      - name: Fetch the relay server
+        run: tools/update_relay.sh --server
 
       - name: Run network tests
         run: ~/godot/${{ matrix.bin }} --headless --path . --script tests/test_net.gd

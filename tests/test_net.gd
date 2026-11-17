@@ -9,7 +9,6 @@ extends SceneTree
 
 const Main = preload("res://scripts/main.gd")
 const Sim = preload("res://scripts/sim/sim.gd")
-const RelayServer = preload("res://relay/relay_server.gd")
 const RelayClient = preload("res://relay/relay_client.gd")
 const RP = preload("res://relay/relay_protocol.gd")
 const LocalInput = preload("res://scripts/input/local_input.gd")
@@ -20,11 +19,16 @@ const Watchdog = preload("res://tests/watchdog.gd")
 ## run takes 44 s, nearly all of it real games running at real speed.
 const TIME_LIMIT := 60
 
+## The relay server isn't part of this repo, only its client is (relay/). The
+## relay tests play through the real one: tools/update_relay.sh fetches it from
+## game-relay, at the tag in relay/VERSION, into this folder, which git ignores.
+const RELAY_SERVER_DIR := "res://tests/relay_server"
+
 
 
 ## Runs a relay server inside the test, polled every physics frame.
 class RelayNode extends Node:
-	var relay: RelayServer
+	var relay: RefCounted # game-relay's relay_server.gd
 
 	func _physics_process(_delta: float) -> void:
 		relay.poll()
@@ -72,14 +76,42 @@ var _port := 0 # first of 4 free UDP ports; see _free_ports()
 var _started := 0 # msec, when the run began
 var _section_from := 0 # msec, when the current section began
 var _watchdog: Watchdog
+var _relay_server: GDScript
 
 
 func _initialize() -> void:
+	_relay_server = _load_relay_server()
+	if _relay_server == null:
+		printerr("test_net needs the relay server from game-relay %s in tests/relay_server/.\nFetch it with: tools/update_relay.sh --server" % _relay_tag("res://relay"))
+		quit(1)
+		return
 	_port = _free_ports(4)
 	_started = Time.get_ticks_msec()
 	_section_from = _started
 	_watchdog = Watchdog.new(TIME_LIMIT, func() -> String: return _current)
 	_run.call_deferred()
+
+
+## game-relay's server script at the tag relay/ was copied at, fetching it if
+## it's missing or from another tag. Null if it can't be had.
+func _load_relay_server() -> GDScript:
+	var path := RELAY_SERVER_DIR + "/relay_server.gd"
+	var want := _relay_tag("res://relay")
+	if _relay_tag(RELAY_SERVER_DIR) != want or not FileAccess.file_exists(path):
+		var out := []
+		var script := ProjectSettings.globalize_path("res://tools/update_relay.sh")
+		if OS.execute("bash", [script, "--server"], out, true) != 0:
+			printerr("tools/update_relay.sh --server failed:\n%s" % "\n".join(out))
+			return null
+	if _relay_tag(RELAY_SERVER_DIR) != want or not FileAccess.file_exists(path):
+		return null
+	return load(path) as GDScript
+
+
+## The game-relay tag written in a folder's VERSION file, "" if it has none.
+static func _relay_tag(dir: String) -> String:
+	var path := dir + "/VERSION"
+	return FileAccess.get_file_as_string(path).strip_edges() if FileAccess.file_exists(path) else ""
 
 
 ## The first of `count` consecutive UDP ports nothing is using, picked at
@@ -279,7 +311,7 @@ func _run() -> void:
 
 	_current = "relay: host gets a room code, a friend joins with it"
 	var relay_node := RelayNode.new()
-	relay_node.relay = RelayServer.new()
+	relay_node.relay = _relay_server.new()
 	relay_node.relay.quiet = true
 	_check(relay_node.relay.start(_port + 2, "127.0.0.1") == OK, "relay should start")
 	root.add_child(relay_node)

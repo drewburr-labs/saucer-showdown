@@ -12,3 +12,6 @@
 # OS noise
 .DS_Store
 Thumbs.db
+
+# The relay server test_net runs, fetched by tools/update_relay.sh
+/tests/relay_server/

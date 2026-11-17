@@ -109,7 +109,7 @@ tools/
   sprite_sheet.gd      saves every sprite, in both team colours, on one sheet
   make_sounds.gd       synthesises every sound in assets/sounds
   sim_trace.gd         plays fixed matches and writes the sim's checksums
-  update_relay.sh      refreshes relay/ from a tag of drewburr-labs/game-relay
+  update_relay.sh      refreshes relay/ from a tag of drewburr-labs/game-relay, and fetches its server for test_net
 tests/
   test_sim.gd          headless tests for every rule and win condition
   test_updater.gd      headless tests for version ordering and asset choice
@@ -117,10 +117,9 @@ tests/
   test_input.gd        gamepad bindings, read and rebound on the settings page; F1 help naming them
   test_menus.gd        every menu driven by a gamepad alone, the on-screen keyboard included
   bot_stats.gd         balance probe: how bot-only matches end
-relay/                 a copy of the relay's scripts from drewburr-labs/game-relay (see relay/README.md)
+relay/                 a copy of the relay's client scripts from drewburr-labs/game-relay (see relay/README.md)
   relay_protocol.gd    the wire format and the relay's address
   relay_client.gd      a game's side of the relay: host, join, send
-  relay_server.gd      the relay itself (with relay_metrics.gd), for test_net to run one
   VERSION              the game-relay tag the copy was taken at
 export_presets.cfg     Linux and Windows export settings
 .github/workflows/
@@ -230,7 +229,8 @@ godot --headless --path . --script tools/sim_trace.gd -- trace.txt
 Online games go through a small relay so players behind home routers can connect: the host opens a room and gets a code, friends join with it, and the relay passes packets between them. The relay isn't part of this game: it's [game-relay](https://github.com/drewburr-labs/game-relay), which any game can use, and its README has everything about running, building, checking and watching one.
 
 - **Address:** the game connects to the public relay at `relay.drewburr.com:24680`. `-- --relay=HOST[:PORT]` points a build at another.
-- **In this repo:** [`relay/`](relay/README.md) holds a copy of the relay's client and server scripts, taken at the game-relay tag in `relay/VERSION`. `tools/update_relay.sh <tag>` moves it to a newer one.
+- **In this repo:** only the client. [`relay/`](relay/README.md) holds a copy of the relay's two client scripts, taken at the game-relay tag in `relay/VERSION`. `tools/update_relay.sh <tag>` moves it to a newer one.
+- **In the tests:** `tests/test_net.gd` plays through a real relay over loopback. `tools/update_relay.sh --server` fetches the server's scripts at the same tag into `tests/relay_server/`, which git ignores; the test runs it for you if the folder is missing or from another tag.
 - **Run one locally:** `docker run -p 24680:24680/udp ghcr.io/drewburr-labs/game-relay`, then start the game with `-- --relay=127.0.0.1`.
 
 ## Releases and updates
