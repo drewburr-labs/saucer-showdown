@@ -29,7 +29,7 @@ extends RefCounted
 ##
 ## The payloads are the game's own business; the relay passes them through.
 
-const HOST_NAME := "saucer.drewburr.com"
+const HOST_NAME := "relay.drewburr.com"
 const PORT := 24680
 const VERSION := 2
 const CODE_CHARS := "ABCDEFGHJKMNPQRSTUVWXYZ23456789" # no I, L, O, 0 or 1

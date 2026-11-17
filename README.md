@@ -58,7 +58,7 @@ Every menu works with a gamepad alone: the d-pad or left stick moves between con
 
 ## Play online
 
-Pick **Play online** and type your name. One player picks **Host a game** and gets a five-letter room code; friends type it in and press **Join**. Games go through the Saucer Showdown relay server (`saucer.drewburr.com`), so nobody has to forward ports.
+Pick **Play online** and type your name. One player picks **Host a game** and gets a five-letter room code; friends type it in and press **Join**. Games go through the Saucer Showdown relay server (`relay.drewburr.com`), so nobody has to forward ports.
 
 Everyone lands in the **lobby**, which shows the room code and each team's seats: its Overlord, then its Greys. Newcomers go on the smaller team, flying its saucer if nobody is; anyone can take any open seat (on either team), and rename themselves. A seat nobody takes is played by a bot. The host picks 2v2, 3v3 or 4v4 and starts the match; shrinking the team size moves the newest extra Greys to a free seat. A room holds as many players as the team size has seats (4, 6 or 8); anyone who tries to join a full room is told so, and the lobby says when it's full. The host can't pick a size too small for the players already in.
 
@@ -229,7 +229,7 @@ godot --headless --path . --script tools/sim_trace.gd -- trace.txt
 
 Online games go through a small relay so players behind home routers can connect: the host opens a room and gets a code, friends join with it, and the relay passes packets between them. The relay isn't part of this game: it's [game-relay](https://github.com/drewburr-labs/game-relay), which any game can use, and its README has everything about running, building, checking and watching one.
 
-- **Address:** the game connects to the public relay at `saucer.drewburr.com:24680`. `-- --relay=HOST[:PORT]` points a build at another.
+- **Address:** the game connects to the public relay at `relay.drewburr.com:24680`. `-- --relay=HOST[:PORT]` points a build at another.
 - **In this repo:** [`relay/`](relay/README.md) holds a copy of the relay's client and server scripts, taken at the game-relay tag in `relay/VERSION`. `tools/update_relay.sh <tag>` moves it to a newer one.
 - **Run one locally:** `docker run -p 24680:24680/udp ghcr.io/drewburr-labs/game-relay`, then start the game with `-- --relay=127.0.0.1`.
 
