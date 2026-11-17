@@ -7,26 +7,33 @@ extends RefCounted
 ## do, as long as relay_protocol.gd's VERSION stays the same.
 ##
 ## run_relay.gd runs it (see Dockerfile); tests drive poll() themselves.
+## It counts what happens in `metrics` (relay_metrics.gd); metrics_text() is
+## those numbers for Prometheus.
 ## It uses a raw ENetConnection rather than ENetMultiplayerPeer, so it sees
 ## every connection as a plain peer and can route between them.
 
 const P = preload("relay_protocol.gd")
+const Metrics = preload("relay_metrics.gd")
 
 const MAX_PEERS := 1024
 const MAX_ROOMS := 400
 const MAX_PACKET := 256 * 1024
 const MAX_BAD_JOINS := 20 # wrong codes per address per minute, against code guessing
+const SAMPLE_MSEC := 10000 # how often metrics look at every peer's round trip and loss
 
 var quiet := false # tests: don't log
 var conn: ENetConnection
+var metrics := Metrics.new()
 
 var _next_id := 2 # 1 means "the host" inside a room
 var _ids := {} # ENetPacketPeer -> id
 var _peers := {} # id -> ENetPacketPeer
 var _room_of := {} # id -> room code
-var _rooms := {} # code -> {"game": game id, "host": id, "size": max clients, "clients": {id: true}}
+var _rooms := {} # code -> {"game": game id, "host": id, "size": max clients, "clients": {id: true},
+#   and for metrics: "stats": the game's Metrics.Game, "opened": msec, "peak": most machines at once}
 var _bad_joins := {} # remote address -> [wrong codes, minute they're counted in]
 var _rng := RandomNumberGenerator.new()
+var _sampled := 0 # msec, when metrics last sampled the peers
 
 
 func start(port: int, bind: String = "*") -> Error:
@@ -60,6 +67,7 @@ func poll() -> int:
 	if conn == null:
 		return 0
 	var n := 0
+	var began := Time.get_ticks_usec()
 	var ev: Array = conn.service(0)
 	while ev[0] != ENetConnection.EVENT_NONE and ev[0] != ENetConnection.EVENT_ERROR:
 		n += 1
@@ -69,21 +77,31 @@ func poll() -> int:
 				_ids[peer] = _next_id
 				_peers[_next_id] = peer
 				_next_id += 1
+				metrics.connections_opened += 1
 			ENetConnection.EVENT_DISCONNECT:
 				if _ids.has(peer):
 					var id: int = _ids[peer]
 					_leave(id)
 					_ids.erase(peer)
 					_peers.erase(id)
+					metrics.connections_closed += 1
 			ENetConnection.EVENT_RECEIVE:
 				var flags := peer.get_packet_flags()
 				var packet := peer.get_packet()
 				if _ids.has(peer) and packet.size() >= 1 and packet.size() <= MAX_PACKET:
 					_receive(_ids[peer], packet, ev[3], flags)
+				else:
+					metrics.ignored_packets += 1
 		ev = conn.service(0)
 	conn.flush()
 	if _bad_joins.size() > 1000:
 		_bad_joins.clear()
+	var now := Time.get_ticks_usec()
+	if n > 0:
+		metrics.poll_time.observe((now - began) / 1000000.0)
+	if now / 1000 - _sampled >= SAMPLE_MSEC:
+		_sampled = now / 1000
+		_sample()
 	return n
 
 
@@ -93,6 +111,34 @@ func room_count() -> int:
 
 func peer_count() -> int:
 	return _peers.size()
+
+
+## Everything the relay counts, as Prometheus text (README.md lists it).
+func metrics_text() -> String:
+	if conn != null:
+		metrics.add_traffic(conn)
+	var open := {} # game label -> [rooms, seats, peers]
+	for code: String in _rooms:
+		var room: Dictionary = _rooms[code]
+		var sums: Array = open.get_or_add(room["stats"].name, [0, 0, 0])
+		sums[0] += 1
+		sums[1] += room["size"] + 1
+		sums[2] += room["clients"].size() + 1
+	return metrics.render(open, _peers.size(), MAX_ROOMS, MAX_PEERS)
+
+
+## Note how well every machine in a room is connected, for the round trip and
+## packet loss histograms.
+func _sample() -> void:
+	metrics.add_traffic(conn)
+	for code: String in _rooms:
+		var room: Dictionary = _rooms[code]
+		var stats: Metrics.Game = room["stats"]
+		for id: int in [room["host"]] + room["clients"].keys():
+			var peer: ENetPacketPeer = _peers.get(id)
+			if peer != null:
+				stats.rtt.observe(peer.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME) / 1000.0)
+				stats.loss.observe(peer.get_statistic(ENetPacketPeer.PEER_PACKET_LOSS) / float(ENetPacketPeer.PACKET_LOSS_SCALE))
 
 
 func _receive(id: int, p: PackedByteArray, channel: int, flags: int) -> void:
@@ -109,7 +155,9 @@ func _receive(id: int, p: PackedByteArray, channel: int, flags: int) -> void:
 				return
 			var code := _new_code()
 			var size := clampi(p[3], 1, P.MAX_ROOM_CLIENTS)
-			_rooms[code] = {"game": game, "host": id, "size": size, "clients": {}}
+			var stats := metrics.game(game)
+			stats.rooms_opened += 1
+			_rooms[code] = {"game": game, "host": id, "size": size, "clients": {}, "stats": stats, "opened": Time.get_ticks_msec(), "peak": 1}
 			_room_of[id] = code
 			var out := PackedByteArray([P.ROOM, size])
 			out.append_array(code.to_ascii_buffer())
@@ -141,13 +189,18 @@ func _receive(id: int, p: PackedByteArray, channel: int, flags: int) -> void:
 				return
 			room["clients"][id] = true
 			_room_of[id] = code
+			room["stats"].joins += 1
+			room["peak"] = maxi(room["peak"], room["clients"].size() + 1)
 			_send(id, P.with_id(P.JOINED, id))
 			_send(room["host"], P.with_id(P.PEER_IN, id))
 		P.DATA:
 			if not _room_of.has(id) or p.size() < 5:
+				metrics.ignored_packets += 1
 				return
 			var room: Dictionary = _rooms[_room_of[id]]
 			var payload := p.slice(5)
+			room["stats"].packets += 1
+			room["stats"].bytes += payload.size()
 			flags &= ENetPacketPeer.FLAG_RELIABLE | ENetPacketPeer.FLAG_UNSEQUENCED | ENetPacketPeer.FLAG_UNRELIABLE_FRAGMENT
 			if room["host"] == id:
 				var out := P.with_id(P.DATA, P.HOST_ID)
@@ -162,6 +215,8 @@ func _receive(id: int, p: PackedByteArray, channel: int, flags: int) -> void:
 				var out := P.with_id(P.DATA, id)
 				out.append_array(payload)
 				_send(room["host"], out, channel, flags)
+		_:
+			metrics.ignored_packets += 1
 
 
 ## The game id at the end of a HOST or JOIN packet, or "" if there isn't a
@@ -185,6 +240,10 @@ func _leave(id: int) -> void:
 			_room_of.erase(c)
 			_peers[c].peer_disconnect_later()
 		_rooms.erase(code)
+		var stats: Metrics.Game = room["stats"]
+		stats.rooms_closed += 1
+		stats.duration.observe((Time.get_ticks_msec() - room["opened"]) / 1000.0)
+		stats.peak.observe(room["peak"])
 		_log("%s room %s closed (%d rooms, %d peers)" % [room["game"], code, _rooms.size(), _peers.size() - 1])
 	else:
 		room["clients"].erase(id)
@@ -201,6 +260,7 @@ func _version_ok(id: int, p: PackedByteArray) -> bool:
 
 
 func _refuse(id: int, why: P.Refusal, reason: String) -> void:
+	metrics.refusals[why] += 1
 	var out := PackedByteArray([P.ERROR, why])
 	out.append_array(reason.to_utf8_buffer())
 	_send(id, out)

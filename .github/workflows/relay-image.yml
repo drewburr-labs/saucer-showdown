@@ -1,7 +1,7 @@
 name: Relay image
 
 # Builds the relay server's container image (relay/Dockerfile), checks it with
-# relay/relay_probe.gd, and on main pushes it to GHCR as :latest and
+# relay/relay_probe.gd and by reading its metrics, and on main pushes it to GHCR as :latest and
 # :sha-<short>, for linux/amd64 and linux/arm64. Pull requests build and
 # test it without pushing.
 #
@@ -72,7 +72,7 @@ jobs:
 
       - name: Smoke test the image
         run: |
-          docker run -d --name relay -p 24680:24680/udp relay:test
+          docker run -d --name relay -p 24680:24680/udp -p 127.0.0.1:24681:24681 relay:test
           ok=0
           for i in 1 2 3; do
             if timeout 30 ~/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64 --headless --path . --script res://relay/relay_probe.gd -- 127.0.0.1:24680; then
@@ -80,6 +80,10 @@ jobs:
             fi
             sleep 2
           done
+          echo "--- metrics"
+          metrics=$(curl -fsS --retry 3 --retry-connrefused http://127.0.0.1:24681/metrics) || ok=0
+          echo "$metrics" | grep -v '^#' | grep -v _bucket
+          echo "$metrics" | grep -qx 'relay_rooms_opened_total{game="relay-probe"} [1-9][0-9]*' || { echo "the probe's room isn't in the metrics"; ok=0; }
           echo "--- relay log"
           docker logs relay
           start=$(date +%s)

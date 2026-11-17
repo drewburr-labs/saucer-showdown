@@ -121,6 +121,7 @@ relay/                 the relay server and its Docker image (see relay/README.m
   relay_protocol.gd    the wire format and the relay's address; the game loads it too
   relay_client.gd      a game's side of the relay: host, join, send; the game uses it too
   example/chat.gd      the smallest game that uses the relay, for other games to copy
+  relay_metrics.gd     what the relay counts, as Prometheus text (served by relay_metrics_http.gd)
   relay_probe.gd       checks a running relay end to end
 export_presets.cfg     Linux and Windows export settings
 .github/workflows/
@@ -237,6 +238,7 @@ Online games go through a small relay so players behind home routers can connect
 - **Image:** `ghcr.io/drewburr-labs/saucer-showdown-relay`, rebuilt by CI only when something in `relay/` changes.
 - **Run it:** `docker run -p 24680:24680/udp ghcr.io/drewburr-labs/saucer-showdown-relay` (UDP must be reachable).
 - **Address:** the game connects to `saucer.drewburr.com:24680`.
+- **Metrics:** games, rooms, seats, connections and the relay's own health, for Prometheus, at `http://<relay>:24681/metrics`. That's a separate TCP port, to keep private; see [Metrics](relay/README.md#metrics).
 
 ## Releases and updates
 

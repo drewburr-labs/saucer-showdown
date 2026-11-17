@@ -2,7 +2,9 @@
 #
 # The Saucer Showdown relay server: lets players behind home routers play
 # online without port forwarding, for Saucer Showdown or any other game (see
-# README.md). It listens on UDP 24680.
+# README.md). It listens on UDP 24680, and serves its metrics for Prometheus
+# over HTTP on TCP 24681. Publish only the UDP port to the internet; scrape
+# the metrics from inside your own network.
 #
 #   docker build -t saucer-showdown-relay relay
 #   docker run -p 24680:24680/udp saucer-showdown-relay
@@ -60,12 +62,12 @@ WORKDIR /relay
 COPY <<EOF project.godot
 config_version=5
 EOF
-COPY relay_protocol.gd relay_server.gd run_relay.gd ./
+COPY relay_protocol.gd relay_server.gd relay_metrics.gd relay_metrics_http.gd run_relay.gd ./
 # Godot keeps its user data under HOME; give it somewhere writable. (It also
 # logs a harmless "libfontconfig.so.1" line at startup: there are no fonts
 # to load on a headless server.)
 ENV HOME=/tmp
 USER 65532:65532
-EXPOSE 24680/udp
+EXPOSE 24680/udp 24681/tcp
 ENTRYPOINT ["tini", "--", "godot", "--headless", "--path", "/relay", "--script", "res://run_relay.gd", "--"]
-CMD ["--port=24680"]
+CMD ["--port=24680", "--metrics-port=24681"]

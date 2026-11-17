@@ -9,6 +9,8 @@ It's plain GDScript running on a headless Godot, packaged as a container. Everyt
 | File | What it is |
 | --- | --- |
 | `relay_server.gd` | rooms, codes, forwarding, limits |
+| `relay_metrics.gd` | what the relay counts, written out for Prometheus |
+| `relay_metrics_http.gd` | serves that over HTTP, on a port of its own |
 | `run_relay.gd` | entry point: listens and polls forever |
 | `relay_protocol.gd` | the wire format, the public relay's address, room codes. Games load it too, so it must not depend on anything else |
 | `relay_client.gd` | a Godot game's side of the relay: host, join, send, receive. Depends only on `relay_protocol.gd` |
@@ -111,7 +113,8 @@ docker run -p 24680:24680/udp ghcr.io/drewburr-labs/saucer-showdown-relay
 
 - It needs **UDP** port 24680 reachable from the internet. An HTTP proxy or tunnel won't carry it.
 - It keeps no state and logs to stdout, one line per room opened and closed, with its game id. Idle, it uses well under 1% of a core and about 35 MB.
-- Options go after the image name: `--port=N` and `--bind=ADDRESS`.
+- It serves [metrics](#metrics) on **TCP** port 24681. That port is for you, not the internet: the command above doesn't publish it.
+- Options go after the image name: `--port=N`, `--bind=ADDRESS`, `--metrics-port=N` and `--metrics-bind=ADDRESS`. Options replace the image's defaults, so repeat `--metrics-port=24681` to keep metrics on (leave it out and they're off).
 - Saucer Showdown connects to `saucer.drewburr.com:24680` (`HOST_NAME` and `PORT` in `relay_protocol.gd`). Players can point a build elsewhere with `-- --relay=HOST[:PORT]`.
 
 ## Build it
@@ -124,13 +127,13 @@ docker build -t saucer-showdown-relay relay
 docker run --rm -p 24680:24680/udp saucer-showdown-relay
 ```
 
-Without Docker, from the game's folder:
+Without Docker, from the game's folder (metrics are off unless you give them a port):
 
 ```bash
-godot --headless --path . --script res://relay/run_relay.gd -- --port=24680
+godot --headless --path . --script res://relay/run_relay.gd -- --port=24680 --metrics-port=24681
 ```
 
-CI (`.github/workflows/relay-image.yml`) builds the image whenever something in this folder (or the workflow) changes, except `example/`, which isn't in the image. It smoke-tests the image with the probe, and on `main` pushes it to `ghcr.io/drewburr-labs/saucer-showdown-relay` as `latest` and `sha-<commit>`. Changes elsewhere in the repo leave the image alone; "Run workflow" rebuilds it by hand.
+CI (`.github/workflows/relay-image.yml`) builds the image whenever something in this folder (or the workflow) changes, except `example/`, which isn't in the image. It smoke-tests the image with the probe, reads its metrics, and on `main` pushes it to `ghcr.io/drewburr-labs/saucer-showdown-relay` as `latest` and `sha-<commit>`. Changes elsewhere in the repo leave the image alone; "Run workflow" rebuilds it by hand.
 
 ## Check a relay
 
@@ -139,6 +142,64 @@ godot --headless --path . --script res://relay/relay_probe.gd -- saucer.drewburr
 ```
 
 It opens a room, checks that a different game id can't join it, joins as a friend and passes a packet each way on channel 1. Then it exits 0, or 1 with the step that failed.
+
+## Metrics
+
+The relay counts what it's doing and serves the numbers in [Prometheus](https://prometheus.io/)'s text format:
+
+```bash
+curl http://localhost:24681/metrics
+```
+
+`/healthz` on the same port answers `ok`, for a liveness check (UDP alone gives an orchestrator nothing to poke).
+
+**Keep the port private.** Metrics are on their own TCP port, apart from the game's UDP port, so that one can face the internet and the other not. Forward or publish only UDP 24680. Scrape 24681 from inside your network: another container, the cluster, or the same machine (`-p 127.0.0.1:24681:24681`). There's no login on it. It never gives out room codes or players' addresses, only the totals below, but they're still yours rather than the world's.
+
+```yaml
+scrape_configs:
+  - job_name: saucer-relay
+    static_configs:
+      - targets: ["relay:24681"]
+```
+
+The relay sees machines, not players: two friends on one couch are one peer. And it can't see inside a game, so there's nothing here about matches or scores.
+
+| Metric | Type | What it is |
+| --- | --- | --- |
+| `relay_rooms{game}` | gauge | rooms open now |
+| `relay_room_seats{game}` | gauge | machines the open rooms have room for, hosts included |
+| `relay_room_peers{game}` | gauge | machines in them now, hosts included |
+| `relay_rooms_opened_total{game}`, `relay_rooms_closed_total{game}` | counter | rooms opened and closed |
+| `relay_room_joins_total{game}` | counter | times a client got into a room |
+| `relay_room_duration_seconds{game}` | histogram | how long each closed room was open |
+| `relay_room_peak_peers{game}` | histogram | the most machines each closed room had at once |
+| `relay_game_packets_total{game}`, `relay_game_bytes_total{game}` | counter | game packets taken in to pass on, and their payload |
+| `relay_peer_round_trip_seconds{game}` | histogram | round trip from the relay to each machine in a room, sampled every 10 s |
+| `relay_peer_packet_loss_ratio{game}` | histogram | packet loss to each of them (0 to 1), sampled with it |
+| `relay_connections` | gauge | connections open now, in a room or not |
+| `relay_connections_opened_total`, `relay_connections_closed_total` | counter | connections made and ended |
+| `relay_refusals_total{reason}` | counter | hosts and joins turned away: `bad_request`, `outdated`, `relay_full`, `no_such_room`, `room_full`, `too_many_tries` |
+| `relay_ignored_packets_total` | counter | packets dropped: empty, too big, an unknown type, or data from outside a room |
+| `relay_network_sent_bytes_total`, `relay_network_received_bytes_total` | counter | traffic on the wire, ENet's overhead included (`..._packets_total` counts the UDP packets) |
+| `relay_poll_duration_seconds` | histogram | how long each pass over waiting packets took. Packets wait while one runs, so this is the delay the relay adds; its `_sum` is the time spent working |
+| `relay_rooms_limit`, `relay_connections_limit` | gauge | the [limits](#limits), to graph how full it is |
+| `relay_info{protocol}` | gauge | always 1; the protocol version it speaks |
+| `process_cpu_seconds_total`, `process_resident_memory_bytes`, `process_start_time_seconds` | | the relay process: CPU used, memory held, when it started (the first two on Linux only) |
+
+Some things to ask of them:
+
+```promql
+sum by (game) (relay_room_peers)                               # who's playing what, right now
+sum(relay_room_peers) / sum(relay_room_seats)                   # how full the rooms are
+sum by (game) (increase(relay_rooms_opened_total[1d]))          # games hosted today
+histogram_quantile(0.5, sum by (le) (rate(relay_room_duration_seconds_bucket[1d])))      # a typical session
+histogram_quantile(0.95, sum by (le) (rate(relay_peer_round_trip_seconds_bucket[5m])))   # ping to the relay, the worst 5%
+sum by (reason) (rate(relay_refusals_total[5m]))                # wrong codes, full rooms, old builds
+histogram_quantile(0.99, rate(relay_poll_duration_seconds_bucket[5m]))                   # delay the relay adds
+rate(process_cpu_seconds_total[5m])                             # cores in use
+```
+
+Game ids come from whoever connects, so only the first 32 the relay sees get a `game` label of their own; any more are counted together as `other`. Everything resets when the relay restarts, as counters do. Answering a scrape takes about half a millisecond with a game or two on the relay.
 
 ## Limits
 
