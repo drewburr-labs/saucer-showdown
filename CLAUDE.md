@@ -18,7 +18,7 @@ Godot 4.7 (standard build, GL Compatibility) team arcade brawler. See README.md 
 - `scripts/ui/` is the menus (home, settings, online lobby, in-game menu); they only call into `main.gd`. They must all work with a gamepad alone (`tests/test_menus.gd` checks every enabled control is reachable); `pad_keyboard.gd` is the on-screen keyboard for text fields. Player settings live in `scripts/settings.gd`.
 - `scripts/audio/sound.gd` plays sound from the sim's events and state, like the view. Every sound in `assets/sounds/` is made by `tools/make_sounds.gd`; edit a recipe there and re-run it rather than editing audio files. Loops are set to loop in their `.import` files.
 - `scripts/view/` draws the sim's state each frame. `art.gd` loads the SVG sprites in `assets/sprites/` and recolours magenta placeholders (`#ff00ff`, `#800080`, `#ff80ff`) per team.
-- `relay/` is the relay server and everything its Docker image needs; CI rebuilds the image only when that folder changes. Its scripts load each other by relative path and depend on nothing outside it. The game loads `relay/relay_protocol.gd` and `relay/relay_client.gd`, and other games copy them, so they must depend on nothing but each other, and `relay/` must never get its own `project.godot` (Godot would skip the folder in exports). Bump `VERSION` in `relay_protocol.gd` when the relay's wire format changes. The relay's metrics (`relay_metrics.gd`, listed in `relay/README.md`) are served on a private TCP port, never the game's UDP port, and must never name a room code or a player's address; a new server script needs adding to the Dockerfile's `COPY`.
+- `relay/` is a copy of four scripts from the relay server's own repo, `drewburr-labs/game-relay`, at the tag in `relay/VERSION`. Never edit them here: change them in game-relay (checked out beside this repo at `../game-relay` on this machine), tag it, then run `tools/update_relay.sh <tag>` and commit. The game loads `relay/relay_protocol.gd` and `relay/relay_client.gd`; `relay_server.gd` and `relay_metrics.gd` are only there so `tests/test_net.gd` can run a real relay. `relay/` must never get its own `project.godot` (Godot would skip the folder in exports). The relay's image, metrics, probe and docs all live in game-relay.
 - SVG sprites are imported as "keep" (each has a `.svg.import` with `importer="keep"`); new sprites need that file too. The SVG renderer ignores `<pattern>` fills.
 
 ## Commands
@@ -28,7 +28,6 @@ godot --headless --path . --import
 godot --headless --path . --script tests/test_sim.gd
 godot --headless --path . --script tests/test_updater.gd
 godot --headless --path . --script tests/test_net.gd
-godot --headless --path . --script tests/test_relay_metrics.gd
 godot --headless --path . --script tests/test_input.gd
 godot --headless --path . --script tests/test_menus.gd
 ```

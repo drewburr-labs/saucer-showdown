@@ -83,7 +83,6 @@ jobs:
           ~/godot/godot --headless --path . --script tests/test_sim.gd
           ~/godot/godot --headless --path . --script tests/test_updater.gd
           ~/godot/godot --headless --path . --script tests/test_net.gd
-          ~/godot/godot --headless --path . --script tests/test_relay_metrics.gd
           ~/godot/godot --headless --path . --script tests/test_input.gd
           ~/godot/godot --headless --path . --script tests/test_menus.gd
 
