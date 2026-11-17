@@ -557,10 +557,13 @@ func _draw_cow(c: E.Cow) -> void:
 	var p := c.pos
 	var rot := 0.0
 	var dangle := false
+	var tucked := false
 	match c.state:
 		E.CowState.CARRIED:
+			# Sat on top of the grey's head, legs tucked, rather than over its eyes.
+			p.y -= 9.0
 			rot = sin(_t * 6.0 + id) * 0.08
-			dangle = true
+			tucked = true
 			if c.holder != null:
 				face = c.holder.facing
 		E.CowState.BEAMED:
@@ -582,7 +585,7 @@ func _draw_cow(c: E.Cow) -> void:
 		else:
 			swing = sin(walk + (PI if k % 2 == 0 else 0.0)) * 2.5
 		var hip := xf * Vector2(lx, 2.0)
-		var hoof := xf * Vector2(lx + swing, 10.0 if not dangle else 11.0)
+		var hoof := xf * Vector2(lx + swing, 7.0 if tucked else (11.0 if dangle else 10.0))
 		draw_line(hip, hoof, INK, 6.0, true)
 		draw_line(hip, hoof, leg_c, 3.4, true)
 		draw_circle(hoof, 2.6, Color("3a2f40"), true, -1.0, true)
@@ -619,7 +622,8 @@ func _draw_grey(u: E.Unit) -> void:
 		var st := clampf(absf(u.vel.y) / 1400.0, 0.0, 0.12)
 		scale = Vector2(1.0 - st * 0.6, 1.0 + st)
 	scale *= GREY_SCALE
-	var bob := -absf(sin(walk)) * 2.0 if running else 0.0
+	# Highest mid-step, when one foot passes the other; lowest with both feet down at full stride.
+	var bob := -absf(cos(walk)) * 2.0 if running else 0.0
 	var rot := 0.0
 	if u.held_by != null:
 		rot = sin(_t * 3.0 + id) * 0.3
@@ -636,7 +640,8 @@ func _draw_grey(u: E.Unit) -> void:
 	# Legs
 	var pants := c.darkened(0.45)
 	for k in 2:
-		var side := -1.0 if k == 0 else 1.0
+		# Leg 0 is the near one, on the trailing side like the near arm; leg 1 the far one.
+		var side := (-1.0 if k == 0 else 1.0) * face
 		var hip := xf * Vector2(side * 3.5, -7.0 + bob)
 		var foot: Vector2
 		if u.riding:
@@ -644,23 +649,28 @@ func _draw_grey(u: E.Unit) -> void:
 		elif not u.grounded:
 			foot = xf * Vector2(side * 4.0 - face * 2.0, -2.0)
 		elif running:
-			var s := sin(walk + (0.0 if k == 0 else PI))
-			foot = xf * Vector2(side * 2.0 + s * 6.0 * face, -maxf(0.0, -cos(walk + (0.0 if k == 0 else PI))) * 4.0)
+			# The foot swings forward through the air and pushes back along the ground.
+			var ph := walk + (0.0 if k == 0 else PI)
+			foot = xf * Vector2(side * 2.0 + sin(ph) * 6.0 * face, -maxf(0.0, cos(ph)) * 4.0)
 		else:
 			foot = xf * Vector2(side * 4.0, 0.0)
 		draw_line(hip, foot, INK, 6.0, true)
 		draw_line(hip, foot, pants, 3.2, true)
 		draw_circle(foot + Vector2(face * 1.0, -0.5), 2.8, INK, true, -1.0, true)
 
-	# Back arm, body, front arm
-	var shoulder := Vector2(0, -21.0 + bob)
+	# The grey is drawn three-quarter on, turned toward the camera, so the shoulder nearest
+	# the screen (its right walking right, its left walking left) is on the trailing side.
+	# That near arm is drawn over the torso; the far one, from a shoulder hidden behind the
+	# leading side, goes under it a shade darker. Shoulders sit at the top of the torso in
+	# grey.svg (y 23 of 39), just under the chin.
+	var shoulder := Vector2(0, -16.0 + bob)
 	var arm_c := c.darkened(0.15)
 	var hands := _hand_targets(u, walk, running)
-	_arm(xf, shoulder + Vector2(-face * 5.0, 0), hands[0], arm_c)
+	_arm(xf, shoulder + Vector2(face * 1.0, 0), hands[0], c.darkened(0.35), hands[2])
 	_tex("grey", u.team, body, Vector2(18, 24), face < 0.0, rot, 1.0, Color.WHITE, scale)
 	if u.warrior:
 		_tex("warrior", u.team, body, Vector2(18, 24), face < 0.0, rot, 1.0, Color.WHITE, scale)
-	_arm(xf, shoulder + Vector2(face * 5.0, 0), hands[1], arm_c)
+	_arm(xf, shoulder + Vector2(-face * 3.0, 0), hands[1], arm_c, hands[3])
 	if u.warrior:
 		var gun := xf * (hands[1] as Vector2)
 		_tex("raygun", u.team, gun, Vector2(5, 7), face < 0.0, rot, 0.9)
@@ -677,26 +687,38 @@ func _draw_grey(u: E.Unit) -> void:
 		draw_arc(p, 26.0, -PI / 2.0, -PI / 2.0 + TAU * k, 32, Color.WHITE, 3.5, true)
 
 
-## Where the back and front hands go, in the grey's local space (feet at origin).
+## [far hand, near hand, far elbow, near elbow] in the grey's local space (feet at origin).
+## Elbows are Vector2.INF for a straight arm. Raised arms keep wide of the head (about 11 px
+## either side of centre) so they never cross the face.
 func _hand_targets(u: E.Unit, walk: float, running: bool) -> Array:
 	var f := u.facing
-	if u.carrying != null:
-		return [Vector2(-f * 8.0, -33.0), Vector2(f * 8.0, -33.0)]
-	if u.warrior:
-		return [Vector2(-f * 7.0, -12.0), Vector2(f * 11.0, -17.0)]
+	var straight := Vector2.INF
+	if u.carrying != null: # elbows out, forearms up the sides of the head to the cow's belly
+		return [Vector2(f * 15.0, -35.5), Vector2(-f * 15.0, -35.5), Vector2(f * 16.0, -22.0), Vector2(-f * 16.0, -22.0)]
+	if u.warrior: # both hands on the raygun, held out front
+		return [Vector2(f * 8.0, -13.0), Vector2(f * 11.0, -15.0), straight, straight]
 	if u.held_by != null or not u.grounded:
-		return [Vector2(-f * 11.0, -27.0), Vector2(f * 11.0, -27.0)]
-	if running:
+		return [Vector2(f * 13.0, -22.0), Vector2(-f * 14.0, -21.0), straight, straight]
+	if running: # each arm swings forward with the opposite leg
 		var s := sin(walk)
-		return [Vector2(-f * 5.0 - s * 5.0 * f, -12.0), Vector2(f * 5.0 + s * 5.0 * f, -12.0)]
-	return [Vector2(-f * 7.0, -11.0), Vector2(f * 7.0, -11.0)]
+		return [Vector2(f * (1.0 + s * 6.0), -9.0 - maxf(0.0, s) * 2.0),
+			Vector2(-f * (3.0 + s * 6.0), -9.0 - maxf(0.0, -s) * 2.0), straight, straight]
+	return [Vector2(f * 1.0, -9.0), Vector2(-f * 3.5, -8.5), straight, straight]
 
 
-func _arm(xf: Transform2D, from: Vector2, to: Vector2, col: Color) -> void:
-	var a := xf * from
-	var b := xf * to
-	draw_line(a, b, INK, 5.5, true)
-	draw_line(a, b, col, 2.8, true)
+func _arm(xf: Transform2D, from: Vector2, to: Vector2, col: Color, elbow := Vector2.INF) -> void:
+	var pts: Array[Vector2] = [xf * from]
+	if elbow.is_finite():
+		pts.append(xf * elbow)
+	pts.append(xf * to)
+	for pass_i in 2:
+		var w := 5.5 if pass_i == 0 else 2.8
+		var cl := INK if pass_i == 0 else col
+		for k in pts.size() - 1:
+			draw_line(pts[k], pts[k + 1], cl, w, true)
+		if pts.size() == 3:
+			draw_circle(pts[1], w * 0.5, cl, true, -1.0, true)
+	var b := pts[-1]
 	draw_circle(b, 2.6, INK, true, -1.0, true)
 	draw_circle(b, 1.7, SKIN, true, -1.0, true)
 
