@@ -662,15 +662,20 @@ func _draw_grey(u: E.Unit) -> void:
 	# the screen (its right walking right, its left walking left) is on the trailing side.
 	# That near arm is drawn over the torso; the far one, from a shoulder hidden behind the
 	# leading side, goes under it a shade darker. Shoulders sit at the top of the torso in
-	# grey.svg (y 23 of 39), just under the chin.
+	# grey.svg (y 23 of 39), just under the chin. Holding a cow up, both arms go behind
+	# the head so only the hands show, at its top corners.
 	var shoulder := Vector2(0, -16.0 + bob)
 	var arm_c := c.darkened(0.15)
 	var hands := _hand_targets(u, walk, running)
-	_arm(xf, shoulder + Vector2(face * 1.0, 0), hands[0], c.darkened(0.35), hands[2])
+	var near_behind := u.carrying != null
+	_arm(xf, shoulder + Vector2(face * 1.0, 0), hands[0], c.darkened(0.35))
+	if near_behind:
+		_arm(xf, shoulder + Vector2(-face * 3.0, 0), hands[1], arm_c)
 	_tex("grey", u.team, body, Vector2(18, 24), face < 0.0, rot, 1.0, Color.WHITE, scale)
 	if u.warrior:
 		_tex("warrior", u.team, body, Vector2(18, 24), face < 0.0, rot, 1.0, Color.WHITE, scale)
-	_arm(xf, shoulder + Vector2(-face * 3.0, 0), hands[1], arm_c, hands[3])
+	if not near_behind:
+		_arm(xf, shoulder + Vector2(-face * 3.0, 0), hands[1], arm_c)
 	if u.warrior:
 		var gun := xf * (hands[1] as Vector2)
 		_tex("raygun", u.team, gun, Vector2(5, 7), face < 0.0, rot, 0.9)
@@ -687,38 +692,28 @@ func _draw_grey(u: E.Unit) -> void:
 		draw_arc(p, 26.0, -PI / 2.0, -PI / 2.0 + TAU * k, 32, Color.WHITE, 3.5, true)
 
 
-## [far hand, near hand, far elbow, near elbow] in the grey's local space (feet at origin).
-## Elbows are Vector2.INF for a straight arm. Raised arms keep wide of the head (about 11 px
-## either side of centre) so they never cross the face.
+## [far hand, near hand] in the grey's local space (feet at origin). Raised arms keep wide of
+## the head (about 11 px either side of centre), or go behind it, so they never cross the face.
 func _hand_targets(u: E.Unit, walk: float, running: bool) -> Array:
 	var f := u.facing
-	var straight := Vector2.INF
-	if u.carrying != null: # elbows out, forearms up the sides of the head to the cow's belly
-		return [Vector2(f * 15.0, -35.5), Vector2(-f * 15.0, -35.5), Vector2(f * 16.0, -22.0), Vector2(-f * 16.0, -22.0)]
+	if u.carrying != null: # under the cow's belly, just outside the top of the head
+		return [Vector2(f * 13.0, -35.0), Vector2(-f * 13.0, -35.0)]
 	if u.warrior: # both hands on the raygun, held out front
-		return [Vector2(f * 8.0, -13.0), Vector2(f * 11.0, -15.0), straight, straight]
+		return [Vector2(f * 8.0, -13.0), Vector2(f * 11.0, -15.0)]
 	if u.held_by != null or not u.grounded:
-		return [Vector2(f * 13.0, -22.0), Vector2(-f * 14.0, -21.0), straight, straight]
+		return [Vector2(f * 13.0, -22.0), Vector2(-f * 14.0, -21.0)]
 	if running: # each arm swings forward with the opposite leg
 		var s := sin(walk)
 		return [Vector2(f * (1.0 + s * 6.0), -9.0 - maxf(0.0, s) * 2.0),
-			Vector2(-f * (3.0 + s * 6.0), -9.0 - maxf(0.0, -s) * 2.0), straight, straight]
-	return [Vector2(f * 1.0, -9.0), Vector2(-f * 3.5, -8.5), straight, straight]
+			Vector2(-f * (3.0 + s * 6.0), -9.0 - maxf(0.0, -s) * 2.0)]
+	return [Vector2(f * 1.0, -9.0), Vector2(-f * 3.5, -8.5)]
 
 
-func _arm(xf: Transform2D, from: Vector2, to: Vector2, col: Color, elbow := Vector2.INF) -> void:
-	var pts: Array[Vector2] = [xf * from]
-	if elbow.is_finite():
-		pts.append(xf * elbow)
-	pts.append(xf * to)
-	for pass_i in 2:
-		var w := 5.5 if pass_i == 0 else 2.8
-		var cl := INK if pass_i == 0 else col
-		for k in pts.size() - 1:
-			draw_line(pts[k], pts[k + 1], cl, w, true)
-		if pts.size() == 3:
-			draw_circle(pts[1], w * 0.5, cl, true, -1.0, true)
-	var b := pts[-1]
+func _arm(xf: Transform2D, from: Vector2, to: Vector2, col: Color) -> void:
+	var a := xf * from
+	var b := xf * to
+	draw_line(a, b, INK, 5.5, true)
+	draw_line(a, b, col, 2.8, true)
 	draw_circle(b, 2.6, INK, true, -1.0, true)
 	draw_circle(b, 1.7, SKIN, true, -1.0, true)
 
